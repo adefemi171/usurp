@@ -6,6 +6,7 @@ import HeroStats from "../../hero-stats";
 import BoardNav, { parseMetric, parseWindow } from "../../board-nav";
 import { baseUrl } from "../../../lib/env";
 import ShareMenu from "../../share-menu";
+import LiveRefresh from "../../live-refresh";
 
 export async function generateMetadata({
   params,
@@ -53,6 +54,7 @@ export default async function ArenaPage({
       <HeroStats />
 
       <BoardNav metric={metric} window={window} />
+      <LiveRefresh />
       <p className="board-explainer">{metric === "rating" ? "Seasonal points combine volume, efficiency, and streaks. Titles are earned here." : "Burn measures volume, not skill. Cost is estimated from native usage; daily bridge snapshots appear on usage profiles."}</p>
 
       {metric === "rating" && (

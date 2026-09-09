@@ -7,6 +7,7 @@ import { GLOBAL_ARENA_SLUG } from "@usurp/db";
 import { currentUser } from "../lib/session";
 import { baseUrl } from "../lib/env";
 import ShareMenu from "./share-menu";
+import LiveRefresh from "./live-refresh";
 
 export default async function Page({
   searchParams,
@@ -48,6 +49,7 @@ export default async function Page({
       <section id="arena" className="arena-panel" aria-label="Global arena">
       <div className="section-heading"><div><p className="eyebrow">Open to everyone</p><h2>Global arena</h2></div><a className="text-link" href="/settings#arenas">Manage arenas ↗</a></div>
       <BoardNav metric={metric} window={window} anchor="#arena" />
+      <LiveRefresh />
       {metric === "rating" ? (
         <p className="board-explainer">
           <strong>Rating rewards consistency.</strong> Seasonal points combine volume, efficiency, and streaks. This is where titles are earned.

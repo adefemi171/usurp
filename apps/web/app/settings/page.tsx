@@ -208,6 +208,7 @@ export default async function SettingsPage({
       {/* ── devices ── */}
       <section className="settings-section" id="devices">
       <h2 className="section">Devices & sync</h2>
+      <details className="auth-options"><summary>First time? Install the CLI</summary><p>Install Node.js 22 or newer, then run these commands in your terminal. You do not need to run the server or Docker.</p><pre><code>{"git clone https://github.com/adefemi171/usurp.git\ncd usurp\nnpm ci\nnpm run build"}</code></pre><p>Then choose <strong>Add a device</strong> below. Run its one-time command from that folder to connect to this deployment.</p></details>
       <p className="field-hint">
         Connect the computer where you code. Device keys stay on that machine; Usurp receives only signed usage summaries.
       </p>

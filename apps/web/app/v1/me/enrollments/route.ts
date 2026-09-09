@@ -13,6 +13,7 @@ import { z } from "zod";
 import { ENROLLMENT_TTL_MS, getDb, issueEnrollment } from "@usurp/db";
 import { NextResponse } from "next/server";
 import { requireUser } from "../../../../lib/session";
+import { baseUrl } from "../../../../lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       // The exact command, so nobody has to assemble it from docs.
       // The CLI is a workspace package until it is published to npm. `npx
       // usurp` would query the registry and fail with ENOVERSIONS.
-      command: `npm run usurp -- login ${issued.code}`,
+      command: `npm run usurp -- login ${issued.code} --api '${baseUrl().replaceAll("'", "'\\''")}'`,
     },
     {
       status: 201,

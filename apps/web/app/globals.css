@@ -906,6 +906,8 @@ button:disabled { cursor: not-allowed; }
 .hero-item strong { font-size: 29px; line-height: 1.2; font-weight: 550; letter-spacing: -.9px; color: var(--text); font-variant-numeric: tabular-nums; }
 .arena-panel { padding: 28px; background: #14181c; border: 1px solid var(--line); border-radius: 18px; }
 .board-explainer { color: var(--muted); font-size: 12px; margin: 16px 0 24px; line-height: 1.75; }
+.live-control { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; color: var(--muted); font-size: 12px; }
+.live-control button[aria-pressed="true"] { color: #9bd9ba; border-color: #46745d; }
 .board-explainer strong { color: #cbd0d4; font-weight: 550; }
 .board-controls { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; border-bottom: 1px solid var(--line); padding: 10px 0 18px; }
 .controls { gap: 5px; margin: 0; }

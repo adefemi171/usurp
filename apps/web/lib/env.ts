@@ -9,7 +9,7 @@ const isProduction = process.env.NODE_ENV === "production";
 
 /** Public origin, used to build OAuth redirect URIs. */
 export function baseUrl(): string {
-  const raw = process.env.USURP_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3000}`;
+  const raw = process.env.USURP_BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT ?? 3000}`;
   return raw.replace(/\/+$/, "");
 }
 
