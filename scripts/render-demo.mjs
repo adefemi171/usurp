@@ -6,8 +6,27 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { maintenanceServer } from "./maintenance.mjs";
+import { probeDatabaseEndpoint } from "./database-endpoint-probe.mjs";
 
-export async function runDemo({ spawnProcess = spawn, runtime = process } = {}) {
+export async function runDemo({ spawnProcess = spawn, runtime = process, serveMaintenance = maintenanceServer, probeEndpoint = probeDatabaseEndpoint } = {}) {
+  if (runtime.env.USURP_MAINTENANCE === "1") {
+    if (runtime.env.USURP_DB_PREFLIGHT_HOST) {
+      try {
+        const result = await probeEndpoint({ host: runtime.env.USURP_DB_PREFLIGHT_HOST, port: runtime.env.USURP_DB_PREFLIGHT_PORT || 15433 });
+        console.log("USURP_DATABASE_PREFLIGHT", JSON.stringify(result));
+      } catch {
+        console.error("USURP_DATABASE_PREFLIGHT failed: remain in maintenance; do not cut over.");
+      }
+    }
+    const server = await serveMaintenance({ port: runtime.env.PORT || "3000" });
+    console.log("Usurp maintenance mode: application, migrations, and worker are stopped.");
+    await new Promise(resolve => {
+      const stop = () => { runtime.off("SIGTERM", stop); runtime.off("SIGINT", stop); server.closeAllConnections(); server.close(resolve); };
+      runtime.on("SIGTERM", stop); runtime.on("SIGINT", stop);
+    });
+    return 0;
+  }
   const root = fileURLToPath(new URL("../", import.meta.url));
   const children = new Set();
   let stopping = false;

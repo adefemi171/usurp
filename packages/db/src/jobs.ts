@@ -17,7 +17,8 @@
 
 // pg-boss 12 exports the class as a named export, not a default.
 import { PgBoss } from "pg-boss";
-import { connectionString, getDb } from "./client.js";
+import { getDb } from "./client.js";
+import { databaseTransport } from "./transport.js";
 import { arenas } from "./schema.js";
 import { recomputeDailyScores, recomputeStandings } from "./rating.js";
 import { applyCircles } from "./circles.js";
@@ -164,7 +165,7 @@ export async function startWorker(options: WorkerOptions = {}): Promise<Worker> 
   const recomputeCron = options.recomputeCron ?? "*/10 * * * *";
   const maintenanceCron = options.maintenanceCron ?? "17 3 * * *";
 
-  const boss = new PgBoss(connectionString());
+  const boss = new PgBoss({ ...databaseTransport(), max: Number(process.env.DATABASE_WORKER_POOL_MAX ?? 3) });
 
   // Surface pg-boss's own failures rather than letting them vanish: an
   // EventEmitter with no `error` listener throws and takes the process down.

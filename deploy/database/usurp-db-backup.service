@@ -1,0 +1,13 @@
+[Unit]
+Description=Encrypted Usurp PostgreSQL backup
+After=docker.service
+Requires=docker.service
+OnFailure=usurp-db-backup-failed.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/usurp-data/backup.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

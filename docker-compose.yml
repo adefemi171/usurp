@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-usurp}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-usurp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-usurp}
       # Deterministic collation, so `order by handle` does not depend on the
       # host's locale. Board ties break on handle, and a board that reorders
@@ -28,7 +28,7 @@ services:
       # 5432 is commonly occupied by a local Postgres/OrbStack instance.
       # Keep the container on its conventional port while choosing 5433 on
       # the host by default; set POSTGRES_PORT=5432 if that port is free.
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -54,7 +54,9 @@ services:
       # `localhost` for the host dev loop, and `localhost` inside a container is
       # the container itself — the classic one-env-file-two-networks trap.
       # To point a container at an external database, set DATABASE_URL_OVERRIDE.
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
+      DATABASE_CA_CERT: ${DATABASE_CA_CERT:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,7 +73,9 @@ services:
       # `localhost` for the host dev loop, and `localhost` inside a container is
       # the container itself — the classic one-env-file-two-networks trap.
       # To point a container at an external database, set DATABASE_URL_OVERRIDE.
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
+      DATABASE_CA_CERT: ${DATABASE_CA_CERT:-}
       NODE_ENV: production
       PORT: "3000"
       # OAuth configuration must be explicitly forwarded: Compose reads .env
@@ -108,7 +112,9 @@ services:
     command: ["npm", "-w", "@usurp/db", "run", "worker"]
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
+      DATABASE_CA_CERT: ${DATABASE_CA_CERT:-}
       NODE_ENV: production
     depends_on:
       postgres:
@@ -131,7 +137,9 @@ services:
       # `localhost` for the host dev loop, and `localhost` inside a container is
       # the container itself — the classic one-env-file-two-networks trap.
       # To point a container at an external database, set DATABASE_URL_OVERRIDE.
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-usurp}}
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
+      DATABASE_CA_CERT: ${DATABASE_CA_CERT:-}
       USURP_API_URL: ${USURP_API_URL:-http://localhost:3000}
     depends_on:
       postgres:

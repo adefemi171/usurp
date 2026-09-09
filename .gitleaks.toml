@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "postgres-password-fallback"
+description = "Published PostgreSQL password fallback"
+regex = '''POSTGRES_PASSWORD:-([^}\r\n]+)'''
+secretGroup = 1

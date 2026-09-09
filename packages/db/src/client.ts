@@ -9,6 +9,7 @@
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema.js";
+import { databaseTransport } from "./transport.js";
 
 export type Db = PostgresJsDatabase<typeof schema>;
 
@@ -26,7 +27,9 @@ export function connectionString(): string {
 
 export function getDb(): Db {
   if (!cached) {
-    const sql = postgres(connectionString(), {
+    const transport = databaseTransport();
+    const sql = postgres(transport.connectionString, {
+      ...(transport.ssl ? { ssl: transport.ssl } : {}),
       // The ingest path is short transactions from a `SessionEnd` hook, not
       // long-lived streaming, so a small pool is plenty and keeps a
       // self-hosted single-container Postgres comfortable.

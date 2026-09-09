@@ -86,7 +86,7 @@ npm run build                    # tsc -b across the workspace
 npm test                         # use an isolated database; integration tests reset fixtures
 
 # 2. Bring up Postgres, run migrations, seed the global arena
-cp .env.example .env
+node scripts/init-env.mjs         # creates .env with unique secrets; never overwrites
 docker compose up -d postgres
 npm run db:migrate
 
@@ -126,7 +126,7 @@ npm run usurp -- hook install
 The whole stack, including migrations, in one command:
 
 ```bash
-cp .env.example .env
+node scripts/init-env.mjs         # new installations only
 docker compose up -d              # postgres → migrate → web on :3000
 docker compose logs -f web
 
@@ -136,6 +136,12 @@ docker compose down               # stop;  add -v to also drop the database
 
 `docker compose up` runs the `migrate` job to completion before starting `web`,
 so the app never serves against a schema it doesn't match.
+
+The database password is required; there is no shared default. Existing installs
+must back up their database and rotate the PostgreSQL role and client settings
+together. Editing `POSTGRES_PASSWORD` does not change a password in an existing
+data volume. Never delete the volume to rotate credentials. Local PostgreSQL is
+bound to `127.0.0.1` only.
 
 ---
 

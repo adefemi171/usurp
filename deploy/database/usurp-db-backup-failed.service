@@ -1,0 +1,5 @@
+[Unit]
+Description=Record Usurp backup failure for off-server monitoring
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.err -t usurp-backup Usurp database backup failed; inspect journalctl -u usurp-db-backup
