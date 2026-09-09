@@ -967,7 +967,10 @@ footer { color: var(--muted); font-size: 12px; line-height: 1.8; }
 .settings-nav p { margin: 0 14px 12px; }
 .settings-content { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
 .settings-section { min-width: 0; padding: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; scroll-margin-top: 110px; }
-.settings-section > .field-hint { margin: -7px 0 22px; }
+/* Only the section introduction tucks beneath its heading. Applying this to
+   every direct hint pulled the device and notification help text up underneath
+   the control immediately before it. */
+.settings-section > h2 + .field-hint { margin: -7px 0 22px; }
 .settings-section .form { width: 100%; }
 .settings-section .card { background: #11161b; padding: 20px; border-radius: 10px; }
 .settings-section .two-up { gap: 28px; }
