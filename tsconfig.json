@@ -1,0 +1,20 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/protocol"
+    },
+    {
+      "path": "./packages/readers"
+    },
+    {
+      "path": "./packages/scoring"
+    },
+    {
+      "path": "./packages/db"
+    },
+    {
+      "path": "./packages/cli"
+    }
+  ]
+}

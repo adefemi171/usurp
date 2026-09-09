@@ -1,0 +1,38 @@
+{
+  "name": "usurp",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A competitive league for AI coding-agent usage",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "build:web": "npm run build && npm -w @usurp/web run build",
+    "dev": "tsc -b --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --force",
+    "db:generate": "npm -w @usurp/db run generate",
+    "db:migrate": "npm -w @usurp/db run migrate",
+    "enroll": "npm -w @usurp/db run enroll --",
+    "web": "node --env-file-if-exists=.env scripts/web.mjs dev",
+    "usurp": "npm -w usurp run start --",
+    "web:start": "node --env-file-if-exists=.env scripts/web.mjs start",
+    "simulate": "npm -w @usurp/scoring run simulate --",
+    "cohort": "npm -w @usurp/scoring run cohort",
+    "recompute": "npm -w @usurp/db run recompute --",
+    "worker": "npm -w @usurp/db run worker --"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.0"
+  }
+}

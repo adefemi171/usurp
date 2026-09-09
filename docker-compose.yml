@@ -1,0 +1,141 @@
+# Usurp — single-file self-host, per `SPEC.md#8`.
+#
+#   docker compose up -d          # postgres, migrations, then the board on :3000
+#   docker compose run --rm enroll --handle kenn
+#   docker compose logs -f web
+#
+# `burnlog set this expectation; org buyers will ask` — so this file is the
+# supported deployment, not a dev convenience. The dev loop (`npm run web`)
+# uses the same DATABASE_URL against the same `postgres` service.
+
+name: usurp
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-usurp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-usurp}
+      POSTGRES_DB: ${POSTGRES_DB:-usurp}
+      # Deterministic collation, so `order by handle` does not depend on the
+      # host's locale. Board ties break on handle, and a board that reorders
+      # itself per deployment is a bug report waiting to happen.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      # Exposed for the local dev loop and `npm run db:generate`. Drop this
+      # line on a real deployment; nothing outside the compose network needs it.
+      # 5432 is commonly occupied by a local Postgres/OrbStack instance.
+      # Keep the container on its conventional port while choosing 5433 on
+      # the host by default; set POSTGRES_PORT=5432 if that port is free.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` alone returns true before the init scripts finish, which
+      # lets the migrate job race a database that is not accepting writes yet.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-usurp} -d ${POSTGRES_DB:-usurp} -q"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  # One-shot: applies migrations and seeds the global arena, then exits 0.
+  # `web` waits on its successful completion, so the app never serves against
+  # a schema it does not match.
+  migrate:
+    build:
+      context: .
+      target: runner
+    command: ["npm", "-w", "@usurp/db", "run", "migrate"]
+    environment:
+      # Composed from POSTGRES_* with the service name as the host, NOT
+      # interpolated from the host's DATABASE_URL. That variable points at
+      # `localhost` for the host dev loop, and `localhost` inside a container is
+      # the container itself — the classic one-env-file-two-networks trap.
+      # To point a container at an external database, set DATABASE_URL_OVERRIDE.
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    environment:
+      # Composed from POSTGRES_* with the service name as the host, NOT
+      # interpolated from the host's DATABASE_URL. That variable points at
+      # `localhost` for the host dev loop, and `localhost` inside a container is
+      # the container itself — the classic one-env-file-two-networks trap.
+      # To point a container at an external database, set DATABASE_URL_OVERRIDE.
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+      NODE_ENV: production
+      PORT: "3000"
+      # OAuth configuration must be explicitly forwarded: Compose reads .env
+      # for interpolation, but does not otherwise inject it into containers.
+      USURP_BASE_URL: ${USURP_BASE_URL:-http://localhost:3000}
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      USURP_AGENTS_VIEW_URL: ${USURP_AGENTS_VIEW_URL:-}
+      USURP_AGENTS_VIEW_DEVICE_ID: ${USURP_AGENTS_VIEW_DEVICE_ID:-}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # `#8`'s job runner: season rollover, decay, the rating recompute.
+  # A separate process from `web` on purpose — a recompute is periodic and
+  # heavy, and behind a load balancer every web replica would run its own copy.
+  worker:
+    build:
+      context: .
+      target: runner
+    command: ["npm", "-w", "@usurp/db", "run", "worker"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Operator tool, not a long-running service — hence `profiles`, which keeps
+  # `docker compose up` from trying to start it.
+  #   docker compose run --rm enroll --handle kenn
+  enroll:
+    build:
+      context: .
+      target: runner
+    profiles: ["tools"]
+    entrypoint: ["npm", "-w", "@usurp/db", "run", "enroll", "--"]
+    environment:
+      # Composed from POSTGRES_* with the service name as the host, NOT
+      # interpolated from the host's DATABASE_URL. That variable points at
+      # `localhost` for the host dev loop, and `localhost` inside a container is
+      # the container itself — the classic one-env-file-two-networks trap.
+      # To point a container at an external database, set DATABASE_URL_OVERRIDE.
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:-usurp}@postgres:5432/${POSTGRES_DB:-usurp}}
+      USURP_API_URL: ${USURP_API_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

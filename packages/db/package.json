@@ -1,0 +1,41 @@
+{
+  "name": "@usurp/db",
+  "version": "0.1.0",
+  "description": "Usurp Postgres schema, client, and migrations",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "default": "./dist/schema.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "generate": "drizzle-kit generate",
+    "migrate": "node --env-file-if-exists=../../.env dist/migrate.js",
+    "enroll": "node --env-file-if-exists=../../.env dist/enroll.js",
+    "recompute": "node --env-file-if-exists=../../.env dist/recompute.js",
+    "worker": "node --env-file-if-exists=../../.env dist/worker.js"
+  },
+  "dependencies": {
+    "@usurp/protocol": "0.1.0",
+    "@usurp/scoring": "0.1.0",
+    "drizzle-orm": "^0.45.2",
+    "pg-boss": "^12.30.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10"
+  }
+}

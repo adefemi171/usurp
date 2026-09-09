@@ -1,0 +1,1 @@
+ALTER TABLE "usage_events" ADD COLUMN "historical" boolean DEFAULT false NOT NULL;

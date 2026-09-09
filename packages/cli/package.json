@@ -1,0 +1,24 @@
+{
+  "name": "usurp",
+  "version": "0.1.0",
+  "description": "Usurp CLI — sync your AI coding-agent usage to the league",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "usurp": "./dist/main.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@usurp/protocol": "0.1.0",
+    "@usurp/readers": "0.1.0"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "^1.1.9"
+  }
+}

@@ -1,0 +1,23 @@
+# Keep the build context small and the image reproducible: everything below is
+# either regenerated inside the build or must never enter an image.
+node_modules
+**/node_modules
+dist
+**/dist
+.next
+**/.next
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Secrets and local state. `.env` is read by `docker compose` on the host, not
+# baked into the image.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+coverage
+*.log
+README.md
+SPEC.md
