@@ -13,14 +13,16 @@ failure handling have automated tests; a real logout/login cycle is not yet test
 Install the package from your trusted Usurp deployment's `/connect` page:
 
 ```sh
-npm install --global https://usurp.onrender.com/downloads/usurp-connect-0.1.0.tgz
+curl --fail --location --retry 3 --output "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz" https://usurp.onrender.com/downloads/usurp-connect-0.1.0.tgz
+npm install --global "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz"
 usurp-connect
 ```
 
 For a user-local install without administrator access:
 
 ```sh
-npm install --prefix "$HOME/.local/share/usurp-connect" https://usurp.onrender.com/downloads/usurp-connect-0.1.0.tgz
+curl --fail --location --retry 3 --output "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz" https://usurp.onrender.com/downloads/usurp-connect-0.1.0.tgz
+npm install --prefix "$HOME/.local/share/usurp-connect" "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz"
 "$HOME/.local/share/usurp-connect/node_modules/.bin/usurp-connect"
 ```
 

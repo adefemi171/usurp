@@ -8,7 +8,7 @@ export default function ConnectPage() {
     <section className="page-intro"><p className="eyebrow">Usurp Connect</p><h1>Your computer.<br/>Connected once.</h1><p>A lightweight local service keeps your coding usage in sync. Set it up in your browser—no app installer, repository cloning, or Docker.</p></section>
     <section className="settings-section"><h2>1. Install and open</h2><p>On the computer where you code, install <a href="https://nodejs.org/en/download" target="_blank" rel="noopener noreferrer">Node.js 22.13 or newer</a>, then run these commands in your terminal.</p>
       <InstallCommands packageUrl={packageUrl} server={server}/>
-      <p className="field-hint">The package comes from this Usurp deployment, not an unpublished npm registry name. It starts a background process and opens private controls on your computer. macOS and Windows use the OS keychain; Linux needs an unlocked Secret Service keyring.</p>
+      <p className="field-hint">The first command downloads the package from this Usurp deployment; npm then installs that local file. This works even where npm blocks remote package installs. Copy the commands exactly—do not include Markdown brackets or link text. It starts a background process and opens private controls on your computer. macOS and Windows use the OS keychain; Linux needs an unlocked Secret Service keyring.</p>
       <p className="field-hint">macOS installation and syncing are verified. Windows and Linux support is experimental pending platform acceptance tests.</p>
       <p className="field-hint"><a href="/downloads/usurp-connect-0.1.0.tgz" download>Download package</a> · <a href="/downloads/usurp-connect-0.1.0.tgz.sha256">SHA-256 checksum</a></p>
     </section>
