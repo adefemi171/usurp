@@ -8,6 +8,7 @@ export {
   dailyScores,
   deviceEnrollments,
   devices,
+  efficiencyFeedback,
   duels,
   events,
   identities,

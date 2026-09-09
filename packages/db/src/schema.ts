@@ -272,6 +272,18 @@ export const usageEvents = pgTable(
   ],
 );
 
+/** A member's private usefulness signal for the efficiency coach. */
+export const efficiencyFeedback = pgTable(
+  "efficiency_feedback",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    recommendation: text("recommendation").notNull(),
+    response: text("response").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.recommendation] }), index("efficiency_feedback_user_idx").on(t.userId)],
+);
+
 export const arenas = pgTable(
   "arenas",
   {

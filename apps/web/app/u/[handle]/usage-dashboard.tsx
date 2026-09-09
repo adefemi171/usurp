@@ -16,10 +16,11 @@ function Segments<T extends string>({ label, options, value, onChange }: {
   </div>;
 }
 
-export default function UsageDashboard({ rows, window, flagged, deviceCount, lastSeen, bridgeImports, canRefreshSource, isOwner }: {
+export default function UsageDashboard({ rows, window, flagged, deviceCount, lastSeen, bridgeImports, canRefreshSource, isOwner, feedback = [] }: {
   rows: UsageSeriesPoint[]; window: BoardWindow; flagged: boolean; deviceCount: number; lastSeen: string | null;
   bridgeImports: Array<{ importedAt: string; pricingVersion: string; agents: string[] }>;
   canRefreshSource: boolean; isOwner: boolean;
+  feedback?: Array<{ recommendation: string; response: string }>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -41,6 +42,7 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
   const [model, setModel] = useState("");
   const [hoverDay, setHoverDay] = useState<number | null>(null);
   const [view, setView] = useState<"treemap" | "list">("treemap");
+  const [feedbackByAdvice, setFeedbackByAdvice] = useState(() => new Map(feedback.map(item => [item.recommendation, item.response])));
   const filtered = filterSeries(rows, agent, model);
   const totals = summarizeSeries(filtered);
   const missingUsage = filtered.some(sessionOnly);
@@ -99,7 +101,11 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
   const cacheMax = Math.max(1, ...cache.map(c => c.value));
   // Coaching is personal. Public profiles remain aggregate-usage views and do
   // not reveal a member's optimization opportunities to other visitors.
-  const advice = isOwner ? efficiencyAdvice(filtered) : [];
+  const advice = isOwner ? efficiencyAdvice(filtered).sort((a, b) => Number(feedbackByAdvice.get(b.id) === "useful") - Number(feedbackByAdvice.get(a.id) === "useful")) : [];
+  const rateAdvice = async (recommendation: string, response: "useful" | "dismissed") => {
+    setFeedbackByAdvice(current => new Map(current).set(recommendation, response));
+    try { await fetch("/v1/me/efficiency-feedback", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ recommendation, response }) }); } catch { /* Local state keeps the choice for this visit. */ }
+  };
   const cards = [
     { label: "Usage cost", value: costUnavailable ? "Unavailable" : money(totals.cost), hint: costUnavailable ? "No priced usage recorded" : hasBridge ? (hasNativeCost ? "AgentsView + native estimates" : "AgentsView · historical API rates") : "Native estimate · not a bill", highlight: metric === "cost" },
     { label: "Effective tokens", value: onlyMetadata ? "Unavailable" : compact(totals.tokens), hint: "Input + output + cache write", highlight: metric === "tokens" },
@@ -124,7 +130,7 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
       <button className={styles.refresh} disabled={refreshing} onClick={refresh} aria-label="Refresh usage">↻ <span>{refreshing ? "Refreshing…" : canRefreshSource ? "Refresh source" : "Refresh view"}</span></button>
     </div>
     <div className={styles.sourceBar}>
-      <span className={styles.sourceBadge}>{hasBridge ? "AgentsView snapshot" : "Native readers"}</span>
+      <span className={styles.sourceBadge}>{hasBridge ? <a href="https://github.com/kenn-io/agentsview" target="_blank" rel="noopener noreferrer">AgentsView snapshot ↗</a> : "Native readers"}</span>
       <span>{bridgeImports.length ? `Last bridge import: ${bridgeImports.map(s => s.importedAt).sort()[0]!.slice(0, 16).replace("T", " ")} UTC` : "No bridge snapshot imported"}</span>
       <span>{deviceCount} device{deviceCount === 1 ? "" : "s"} · USD · UTC days</span>
     </div>
@@ -136,13 +142,14 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
       <div className={styles.panelHeader}><div><h2>Efficiency coach</h2><p>Suggestions from aggregate usage only — never your prompts, code, projects, or commands.</p></div><a href="/connect" className={styles.adviceLink}>Local coaching ↗</a></div>
       <div className={styles.adviceGrid}>{advice.map(item => <article key={item.id}>
         <h3>{item.title}</h3><p>{item.detail}</p><strong>Try this:</strong><p>{item.action}</p>
+        <div className={styles.adviceActions}><button type="button" aria-pressed={feedbackByAdvice.get(item.id) === "useful"} onClick={() => rateAdvice(item.id, "useful")}>Useful</button><button type="button" aria-pressed={feedbackByAdvice.get(item.id) === "dismissed"} onClick={() => rateAdvice(item.id, "dismissed")}>Not for me</button></div>
         {item.id === "local" && <a className={styles.runewardLink} href="https://runewardd.github.io/runeward/" target="_blank" rel="noopener noreferrer">Learn about Runeward governance ↗</a>}
       </article>)}</div>
     </section>}
     <details className={styles.coverage}>
       <summary><span>{totals.unpriced || missingUsage ? "Partial data coverage" : "Data sources & coverage"}</span><span>{onlyMetadata || !filtered.length ? "No measured usage" : unpricedModels.length ? `${unpricedModels.length} unpriced model${unpricedModels.length === 1 ? "" : "s"}` : "All measured usage priced"}{metadataModels.length ? ` · ${metadataModels.length} metadata-only model${metadataModels.length === 1 ? "" : "s"}` : ""} <span aria-hidden="true">↗</span></span></summary>
       <div className={styles.coverageBody}>
-        <p>Usage cost is an API-rate calculation, not the amount charged to your account. AgentsView totals are imported unchanged; native estimates are used only for tools outside the snapshot. No usage is counted twice.</p>
+        <p>Usage cost is an API-rate calculation, not the amount charged to your account. <a href="https://github.com/kenn-io/agentsview" target="_blank" rel="noopener noreferrer">AgentsView ↗</a> totals are imported unchanged; native estimates are used only for tools outside the snapshot. No usage is counted twice.</p>
         {!!unpricedModels.length && <p><strong>Price unavailable:</strong> {unpricedModels.join(", ")}. Recorded tokens remain visible; unknown prices are not treated as free usage.</p>}
         {missingUsage && <p><strong>Selected model only:</strong> {metadataModels.join(", ")}. These saved conversations have no measured tokens. Cursor’s current model selection does not identify every model used in a conversation. To add measured model usage, import a Cursor usage CSV with token counters.</p>}
         {hasBridge && <p>Bridge snapshots have daily tokens and cost, but no call, session, edit, or commit counts. Those fields are shown as unavailable, never invented. AgentsView must have collected new activity before Refresh source can import it.</p>}

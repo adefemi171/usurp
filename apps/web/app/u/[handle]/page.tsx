@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getDb, userProfile, type BoardWindow } from "@usurp/db";
+import { efficiencyFeedback, getDb, userProfile, type BoardWindow } from "@usurp/db";
+import { eq } from "drizzle-orm";
 import UsageDashboard from "./usage-dashboard";
 import styles from "./dashboard.module.css";
 import { currentUser } from "../../../lib/session";
@@ -23,6 +24,7 @@ export default async function UserPage({ params, searchParams }: {
   if (!profile) notFound();
   const isOwner = viewer?.handle?.toLowerCase() === profile.handle.toLowerCase();
   const canRefreshSource = !!(isOwner && viewer && await ownedBridge(viewer.id));
+  const feedback = isOwner && viewer ? await getDb().select({ recommendation: efficiencyFeedback.recommendation, response: efficiencyFeedback.response }).from(efficiencyFeedback).where(eq(efficiencyFeedback.userId, viewer.id)) : [];
   return <main className={styles.dashboard}>
     <header className={styles.header}>
       <div className={styles.identity}>
@@ -35,10 +37,10 @@ export default async function UserPage({ params, searchParams }: {
     </header>
     <UsageDashboard key={window} rows={profile.analyticsSeries} window={window} flagged={profile.flagged}
       bridgeImports={profile.bridgeImports} canRefreshSource={canRefreshSource} isOwner={isOwner}
-      deviceCount={profile.deviceCount} lastSeen={profile.lastSeen?.toISOString() ?? null} />
+      deviceCount={profile.deviceCount} lastSeen={profile.lastSeen?.toISOString() ?? null} feedback={feedback} />
     <footer className={styles.footer}>
       <span>YOUR USAGE. YOUR DATA.</span>
-      <p>Aggregate usage only: hourly native records and optional daily AgentsView snapshots. Usurp does not collect project names, session titles, prompts, or code.
+      <p>Aggregate usage only: hourly native records and optional daily <a href="https://github.com/kenn-io/agentsview" target="_blank" rel="noopener noreferrer">AgentsView snapshots ↗</a>. Usurp does not collect project names, session titles, prompts, or code.
         Historical imports remain excluded from ratings, streaks, and duels.</p>
       <details><summary>Import older activity</summary><p>From your source folder, run <code>npm run usurp -- sync --all</code>, then select All time.</p></details>
     </footer>

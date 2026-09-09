@@ -41,6 +41,9 @@
 .adviceGrid strong { color: #d8c492; font-size: 11px; }
 .runewardLink { display: inline-block; color: #d9c18e; font-size: 12px; text-decoration: none; }
 .runewardLink:hover { color: #f5d9a4; text-decoration: underline; }
+.adviceActions { display: flex; gap: 8px; margin-top: 14px; }
+.adviceActions button { border: 1px solid #4b5a56; border-radius: 6px; padding: 6px 9px; color: #b7c9bf; background: transparent; font-size: 11px; }
+.adviceActions button[aria-pressed="true"] { background: #294137; border-color: #66957d; color: #e2f0e6; }
 .notice { margin: 14px 0 0; color: #bda482; font-size: 11px; display: flex; gap: 8px; align-items: baseline; }
 .notice span { color: var(--accent); }
 .archive { font-size: 11px; color: #84919f; margin: 7px 0 0; }
@@ -136,6 +139,8 @@
 .identity p { font-size: 13px; }
 .sourceBar { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; color: #9ca8b7; font-size: 12px; padding: 0 0 18px; }
 .sourceBadge { color: #8bd9c5; background: #153029; border: 1px solid #2d5246; border-radius: 20px; padding: 5px 10px; }
+.sourceBadge a { color: inherit; text-decoration: none; }
+.sourceBadge a:hover { text-decoration: underline; }
 .refreshStatus { border: 1px solid #3c5267; padding: 13px 16px; border-radius: 8px; background: #14202d; color: #c5d7e8; line-height: 1.6; }
 .refresh { border: 1px solid var(--line); padding: 8px 14px; border-radius: 7px; color: var(--text); background: var(--panel); }
 .refresh:disabled { opacity: .6; cursor: progress; }
