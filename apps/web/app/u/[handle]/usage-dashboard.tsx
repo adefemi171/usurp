@@ -138,14 +138,17 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
     <div className={styles.cards} aria-label="Usage summary">{cards.map(c => <article className={`${styles.card} ${c.highlight ? styles.highlight : ""}`} key={c.label}>
       <p>{c.label}</p><strong>{c.value}</strong><small>{c.hint}</small>
     </article>)}</div>
-    {!!advice.length && <section className={styles.advice} aria-label="Efficiency coach">
-      <div className={styles.panelHeader}><div><h2>Efficiency coach</h2><p>Suggestions from aggregate usage only — never your prompts, code, projects, or commands.</p></div><a href="/connect" className={styles.adviceLink}>Local coaching ↗</a></div>
-      <div className={styles.adviceGrid}>{advice.map(item => <article key={item.id}>
-        <h3>{item.title}</h3><p>{item.detail}</p><strong>Try this:</strong><p>{item.action}</p>
-        <div className={styles.adviceActions}><button type="button" aria-pressed={feedbackByAdvice.get(item.id) === "useful"} onClick={() => rateAdvice(item.id, "useful")}>Useful</button><button type="button" aria-pressed={feedbackByAdvice.get(item.id) === "dismissed"} onClick={() => rateAdvice(item.id, "dismissed")}>Not for me</button></div>
-        {item.id === "local" && <a className={styles.runewardLink} href="https://runewardd.github.io/runeward/" target="_blank" rel="noopener noreferrer">Learn about Runeward governance ↗</a>}
-      </article>)}</div>
-    </section>}
+    {!!advice.length && <details className={styles.advice} aria-label="Efficiency coach">
+      <summary><span>Efficiency coach</span><small>{advice.length} suggestion{advice.length === 1 ? "" : "s"} · Show</small></summary>
+      <div className={styles.adviceContent}>
+        <div className={styles.panelHeader}><div><h2>Efficiency coach</h2><p>Suggestions from aggregate usage only — never your prompts, code, projects, or commands.</p></div><a href="/connect#local-coaching" className={styles.adviceLink}>Set up local coaching ↗</a></div>
+        <div className={styles.adviceGrid}>{advice.map(item => <article key={item.id}>
+          <h3>{item.title}</h3><p>{item.detail}</p><strong>Try this:</strong><p>{item.action}</p>
+          <div className={styles.adviceActions}><button type="button" aria-pressed={feedbackByAdvice.get(item.id) === "useful"} onClick={() => rateAdvice(item.id, "useful")}>Useful</button><button type="button" aria-pressed={feedbackByAdvice.get(item.id) === "dismissed"} onClick={() => rateAdvice(item.id, "dismissed")}>Not for me</button></div>
+          {item.id === "local" && <a className={styles.runewardLink} href="https://runewardd.github.io/runeward/" target="_blank" rel="noopener noreferrer">Learn about Runeward governance ↗</a>}
+        </article>)}</div>
+      </div>
+    </details>}
     <details className={styles.coverage}>
       <summary><span>{totals.unpriced || missingUsage ? "Partial data coverage" : "Data sources & coverage"}</span><span>{onlyMetadata || !filtered.length ? "No measured usage" : unpricedModels.length ? `${unpricedModels.length} unpriced model${unpricedModels.length === 1 ? "" : "s"}` : "All measured usage priced"}{metadataModels.length ? ` · ${metadataModels.length} metadata-only model${metadataModels.length === 1 ? "" : "s"}` : ""} <span aria-hidden="true">↗</span></span></summary>
       <div className={styles.coverageBody}>

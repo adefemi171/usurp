@@ -31,7 +31,13 @@
 .card small { display: block; color: #77818f; font-size: 10px; line-height: 1.5; margin-top: 10px; }
 .highlight { border-color: #967440; background: linear-gradient(140deg, #262118, var(--panel) 85%); }
 .highlight strong { color: #ebc184; }
-.advice { margin-top: 22px; border: 1px solid #3f4b4c; border-radius: 14px; padding: 25px; background: linear-gradient(135deg, #17201f, var(--panel)); }
+.advice { margin-top: 22px; border: 1px solid #3f4b4c; border-radius: 14px; background: linear-gradient(135deg, #17201f, var(--panel)); }
+.advice > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 20px; color: #dce5de; font-size: 13px; font-weight: 600; }
+.advice > summary::-webkit-details-marker { display: none; }
+.advice > summary::after { content: "⌄"; color: #d8c492; font-size: 16px; line-height: 1; }
+.advice[open] > summary::after { transform: rotate(180deg); }
+.advice > summary small { margin-left: auto; color: #91a099; font-size: 11px; font-weight: 400; }
+.adviceContent { padding: 0 25px 25px; }
 .adviceLink { color: #d9c18e; text-decoration: none; font-size: 12px; white-space: nowrap; }
 .adviceLink:hover { color: #f5d9a4; text-decoration: underline; }
 .adviceGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
