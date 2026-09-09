@@ -66,4 +66,9 @@ describe("sign-in experience", () => {
     state.user = { handle: "member" };
     await expect(SignInPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("redirect:/settings");
   });
+  it("preserves pairing for an existing session without allowing external redirects", async () => {
+    state.user = { handle: "member" };
+    await expect(SignInPage({ searchParams: Promise.resolve({ return_to: "/connect/approve?code=ABCD" }) })).rejects.toThrow("redirect:/connect/approve?code=ABCD");
+    await expect(SignInPage({ searchParams: Promise.resolve({ return_to: "//evil.test" }) })).rejects.toThrow("redirect:/");
+  });
 });

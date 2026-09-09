@@ -29,6 +29,8 @@ export interface SyncOptions {
    * never look like the user's session failed.
    */
   soft?: boolean;
+  agents?: string[];
+  onWarning?: (message: string) => void;
 }
 
 export async function sync(options: SyncOptions): Promise<number> {
@@ -73,9 +75,10 @@ export async function sync(options: SyncOptions): Promise<number> {
     ...(since ? { since } : {}),
     now,
     ...(options.noGit ? { noGit: true } : {}),
+    ...(options.agents ? { agents: options.agents } : {}),
   });
 
-  for (const message of warnings) warn(message);
+  for (const message of warnings) { warn(message); options.onWarning?.(message); }
 
   const repairAgents = options.repair ? reads.filter(r => ["codex", "cursor"].includes(r.agent)).map(r => r.agent as "codex" | "cursor") : [];
   if (options.repair && (!repairAgents.length || buckets.length > 2000 ||
@@ -186,6 +189,8 @@ export async function sync(options: SyncOptions): Promise<number> {
       group.count++; groupedFlags.set(key, group);
     }
     for (const flag of groupedFlags.values()) warn(`${flag.count} bucket(s) flagged (${flag.code}): ${flag.detail}`);
+    if (rejected.length) { options.onWarning?.(`${rejected.length} usage buckets were rejected. Sync has not advanced.`); return fail(1); }
+    if (flags.length) options.onWarning?.(`${flags.length} validation or pricing flags. Review data quality on your dashboard.`);
 
     if (!options.quiet && accepted > 0) {
       info(dim(`  ${cyan(`${(options.api ?? config.apiUrl).replace(/\/+$/, "")}/`)}`));

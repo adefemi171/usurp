@@ -1,6 +1,7 @@
 import { availableProviders, devAuthEnabled } from "../../lib/env";
 import { currentUser } from "../../lib/session";
 import { redirect } from "next/navigation";
+import { safeReturnTo } from "../../lib/return-to";
 
 const LABELS: Record<string, string> = {
   github: "Sign in with GitHub",
@@ -24,9 +25,8 @@ export default async function SignInPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  if (await currentUser()) redirect("/settings");
-
   const params = await searchParams;
+  if (await currentUser()) redirect(typeof params.return_to === "string" ? safeReturnTo(params.return_to) : "/settings");
   const error = typeof params.error === "string" ? params.error : undefined;
   const returnTo = typeof params.return_to === "string" ? params.return_to : undefined;
   const providers = availableProviders();

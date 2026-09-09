@@ -1,4 +1,5 @@
 export * as schema from "./schema.js";
+export { startPairing, inspectPairing, decidePairing, pollPairing, cancelPairing, PAIRING_TTL_MS } from "./pairing.js";
 export { saveOwnedBridge, mergeBridgeSeries } from "./bridge.js";
 export {
   achievements,

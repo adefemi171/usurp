@@ -47,7 +47,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["packages/*/src/**/*.test.ts", "apps/*/**/*.test.ts", "scripts/**/*.test.ts"],
+    include: ["packages/*/src/**/*.test.ts", "apps/*/**/*.test.ts", "scripts/**/*.test.ts", "desktop/src/**/*.test.ts"],
     environment: "node",
     // Integration tests share one Postgres. Running files in parallel against
     // it makes truncation in one file wipe another's fixtures mid-assertion.

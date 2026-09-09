@@ -52,6 +52,8 @@ export function resolveSince(input: {
 }
 
 export interface CollectOptions {
+  /** Explicit consent list; omitted preserves the CLI's existing defaults. */
+  agents?: string[];
   deviceId: string;
   since?: Date;
   now?: Date;
@@ -75,6 +77,7 @@ export async function collect(options: CollectOptions): Promise<Collected> {
   const reads: Collected["reads"] = [];
 
   for (const reader of defaultReaders()) {
+    if (options.agents && !options.agents.includes(reader.id)) continue;
     if (!(await reader.detect())) continue;
 
     const result = await reader.read({

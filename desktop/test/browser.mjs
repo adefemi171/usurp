@@ -1,0 +1,51 @@
+import { chromium } from "playwright";
+import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { generateDeviceKeyPair, signPayload, dedupeKey } from "../../packages/protocol/dist/index.js";
+
+const website = "http://localhost:3107";
+const keys = generateDeviceKeyPair();
+const post = async (path, body) => {
+  const response = await fetch(`${website}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  return { status: response.status, body: await response.json() };
+};
+const issued = await post("/v1/pairings", { action: "start", publicKey: keys.publicKey, label: "Connect browser acceptance test" });
+assert.equal(issued.status, 201);
+const root = await mkdtemp(join(tmpdir(), "usurp-browser-e2e-"));
+const browser = await chromium.launch({ channel: "chrome", headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+  await page.goto(issued.body.verificationUri);
+  await page.getByRole("link", { name: "Developer sign-in (local only)" }).click();
+  const handle = `browser_${Date.now().toString(36)}`;
+  await page.getByRole("textbox", { name: "Handle" }).fill(handle);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("heading", { name: "Is this your code?" }).waitFor();
+  assert.ok((await page.locator("main").innerText()).includes(issued.body.code));
+  await page.screenshot({ path: join(root, "approval.png"), fullPage: true });
+  await page.getByRole("button", { name: "Yes, connect this computer" }).click();
+  await page.getByRole("heading", { name: "Computer connected." }).waitFor();
+  const result = await post("/v1/pairings", { action: "poll", token: issued.body.token });
+  assert.equal(result.body.status, "approved"); assert.equal(result.body.handle, handle);
+  const deviceId = result.body.deviceId;
+  const hourDate = new Date(Date.now() - 3600_000); hourDate.setUTCMinutes(0,0,0); const hour = hourDate.toISOString().replace(".000Z", "Z");
+  const bucket = { hour, agent: "codex", model: "gpt-5.6-sol", input_tokens: 100, output_tokens: 10, cache_read_tokens: 900, cache_write_tokens: 0, calls: 1, sessions_started: 1, sessions_completed: 1, sessions_abandoned: 0, edits_applied: 0, edits_reverted: 0, commits: 0, cost_micros: 0, dedupe_key: dedupeKey(deviceId, hour, "codex", "gpt-5.6-sol") };
+  const payload = signPayload({ v: 1, device_id: deviceId, seq: 1, submitted_at: new Date().toISOString(), reader_revision: 2, buckets: [bucket] }, keys.privateKeyPem);
+  const ingested = await post("/v1/ingest", payload);
+  assert.equal(ingested.status, 200, JSON.stringify(ingested.body)); assert.equal(ingested.body.accepted, 1); assert.equal(ingested.body.rejected.length, 0);
+  assert.equal((await post("/v1/ingest", payload)).status, 409);
+  await page.goto(`${website}/u/${handle}?window=all`);
+  assert.ok((await page.locator("main").innerText()).toLowerCase().includes("codex"));
+  await page.screenshot({ path: join(root, "profile.png"), fullPage: true });
+  const anonymous = await browser.newPage();
+  assert.equal((await anonymous.goto(`${website}/u/${handle}?window=all`)).status(), 404);
+  await page.goto(`${website}/settings#devices`);
+  assert.ok(await page.getByRole("button", { name: "Compete in the global arena" }).isVisible());
+  await page.getByRole("button", { name: "Revoke", exact: true }).click();
+  await page.getByText("revoked", { exact: true }).waitFor();
+  const revoked = await post("/v1/ingest", signPayload({ ...payload, seq: 2, submitted_at: new Date().toISOString() }, keys.privateKeyPem));
+  assert.equal(revoked.body.error, "device_revoked");
+  console.log(JSON.stringify({ passed: true, tests: ["new-account return to approval", "code confirmation", "signed upload", "replay rejection", "owner profile display", "anonymous rejection", "no global auto-enrollment", "device revocation"], artifacts: root }));
+} finally { await browser.close(); }

@@ -100,6 +100,16 @@ describe("archive sync batching", () => {
     expect(mocks.ingest).toHaveBeenCalledTimes(2);
   });
 
+  it("forwards source consent and treats rejected usage as an incomplete sync", async () => {
+    mocks.ingest.mockResolvedValueOnce({ ok: true, data: { accepted: 499, rejected: [{ bucketIndex: 0, code: "invalid", detail: "test rejection" }], flags: [] } });
+    const onWarning = vi.fn();
+    expect(await sync({ agents: ["cursor"], noBridge: true, quiet: true, onWarning })).toBe(1);
+    expect(mocks.collect).toHaveBeenCalledWith(expect.objectContaining({ agents: ["cursor"] }));
+    expect(config.lastSyncAt).toBe("2026-09-08T00:00:00Z");
+    expect(config.seq).toBe(5);
+    expect(onWarning).toHaveBeenCalled();
+  });
+
   it("does not advance the regular cursor for an empty archive", async () => {
     mocks.collect.mockResolvedValue({ buckets: [], warnings: [] });
     expect(await sync({ all: true, quiet: true })).toBe(0);

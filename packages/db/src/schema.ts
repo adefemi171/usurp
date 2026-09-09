@@ -564,6 +564,18 @@ export const userAchievements = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.code] })],
 );
 
+/** Short-lived browser approval requests. Polling secrets are stored hashed. */
+export const devicePairings = pgTable("device_pairings", {
+  codeHash: text("code_hash").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  publicKey: text("public_key").notNull(),
+  label: text("label").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+  decision: text("decision"),
+  deviceId: text("device_id").references(() => devices.id, { onDelete: "cascade" }),
+}, (t) => [index("device_pairings_expiry_idx").on(t.expiresAt)]);
+
 export const usersRelations = relations(users, ({ many }) => ({
   identities: many(identities),
   devices: many(devices),

@@ -6,7 +6,8 @@
  * into a bug report is worth more than one field's convenience.
  */
 
-import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -65,10 +66,10 @@ export async function loadConfig(): Promise<Config> {
 export async function saveConfig(config: Config): Promise<void> {
   const path = configPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-  // `writeFile`'s mode is ignored when the file already exists, so set it
-  // explicitly rather than assuming a fresh create.
-  await chmod(path, 0o600).catch(() => {});
+  // A crash must not truncate the device identity or upload sequence in place.
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  await rename(temporary, path);
 }
 
 /** Merge and persist in one step. */

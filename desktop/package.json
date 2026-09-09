@@ -1,0 +1,77 @@
+{
+  "name": "usurp-connect",
+  "productName": "Usurp Connect",
+  "version": "0.1.0",
+  "description": "Private local usage sync for Usurp",
+  "author": "Usurp contributors",
+  "license": "MIT",
+  "private": true,
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "release": "node release.mjs",
+    "typecheck": "../node_modules/.bin/tsc -p tsconfig.json",
+    "test:e2e": "npm run build && node test/e2e.mjs"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "1.2.0",
+    "electron-updater": "6.8.9"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.25.12",
+    "playwright": "^1.63.0"
+  },
+  "build": {
+    "appId": "com.usurp.connect",
+    "artifactName": "Usurp-Connect-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@napi-rs/**/*"
+    ],
+    "protocols": [
+      {
+        "name": "Usurp Connect",
+        "schemes": [
+          "usurp-connect"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "notarize": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "adefemi171",
+        "repo": "usurp"
+      }
+    ]
+  }
+}

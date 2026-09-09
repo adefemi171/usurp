@@ -65,6 +65,7 @@ export class ApiClient {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        redirect: "error",
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (err) {

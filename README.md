@@ -5,13 +5,17 @@ arena, your organization, or a private club of friends — and lose it the momen
 someone plays better than you.
 
 **Status: M0-M3 complete.** Signed ingest, the Postgres
-schema, two agent readers (Claude Code and VS Code Copilot), the Burn board, the
+schema, native readers for Claude Code, Codex, Cursor and VS Code Copilot, the Burn board, the
 rating board, the Throne and its feed, shrinking circles, duels, notifications,
 share cards,
 the per-user drill-down, OAuth sign-in, handles, per-arena visibility, clubs via
-invite code, and self-service device enrollment all work end to end. GitHub and
-Google have not been run against the live providers yet — the flow is verified
-through the local `dev` provider.
+invite code, and self-service device enrollment. Hosted GitHub sign-in has been
+verified; Google requires deployment-specific credentials and its own live check.
+
+**Usurp Connect is a desktop preview, not a public installer release.** It adds
+browser-approved device pairing, source consent and background sync using the
+existing readers. See [the companion guide](docs/usurp-connect.md) for development,
+testing and signing requirements. `/connect` keeps unavailable downloads disabled.
 
 **M2's ship gate has passed.** `SPEC.md#4.4` requires proving in simulation that
 consistency × efficiency beats volume, with `#1` saying kill the project if it
@@ -77,7 +81,7 @@ Needs Node 22+ and Docker.
 # 1. Install and build
 npm install
 npm run build                    # tsc -b across the workspace
-npm test                         # 382 tests
+npm test                         # use an isolated database; integration tests reset fixtures
 
 # 2. Bring up Postgres, run migrations, seed the global arena
 cp .env.example .env

@@ -208,7 +208,8 @@ export default async function SettingsPage({
       {/* ── devices ── */}
       <section className="settings-section" id="devices">
       <h2 className="section">Devices & sync</h2>
-      <details className="auth-options"><summary>First time? Install the CLI</summary><p>Install Node.js 22 or newer, then run these commands in your terminal. You do not need to run the server or Docker.</p><pre><code>{"git clone https://github.com/adefemi171/usurp.git\ncd usurp\nnpm ci\nnpm run build"}</code></pre><p>Then choose <strong>Add a device</strong> below. Run its one-time command from that folder to connect to this deployment.</p></details>
+      <p>Connect your computer once, then let Usurp Connect handle syncing.</p>
+      <a className="button" href="/connect">Connect this computer</a>
       <p className="field-hint">
         Connect the computer where you code. Device keys stay on that machine; Usurp receives only signed usage summaries.
       </p>
@@ -255,9 +256,9 @@ export default async function SettingsPage({
         </table></div>
       )}
 
-      <div style={{ marginTop: 18 }}>
+      <details className="auth-options"><summary>Advanced: connect with the CLI</summary><p>Until signed desktop installers are released, the CLI is the available setup path. Install Node.js 22 or newer, then run:</p><pre><code>{"git clone https://github.com/adefemi171/usurp.git\ncd usurp\nnpm ci\nnpm run build"}</code></pre><p>Create a one-time code and run its command from that folder.</p><div style={{ marginTop: 18 }}>
         <EnrollButton />
-      </div>
+      </div></details>
 
       {activeDevices.length === 0 && (
         <p className="field-hint" style={{ marginTop: 12 }}>

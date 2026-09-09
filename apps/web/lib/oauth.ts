@@ -20,6 +20,8 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { OAuthProfile } from "@usurp/db";
+import { safeReturnTo } from "./return-to";
+export { safeReturnTo } from "./return-to";
 import {
   authSecret,
   baseUrl,
@@ -236,14 +238,6 @@ export interface StartedFlow {
  * An open redirect on a sign-in route is a phishing primitive: it lets an
  * attacker send a victim through *your* domain and land them anywhere.
  */
-export function safeReturnTo(value: string | null | undefined): string {
-  if (!value) return "/";
-  if (!value.startsWith("/")) return "/";
-  // `//evil.com` and `/\evil.com` are protocol-relative and leave the origin.
-  if (value.startsWith("//") || value.startsWith("/\\")) return "/";
-  return value;
-}
-
 export function startFlow(provider: Provider, returnTo: string): StartedFlow {
   const state = randomBytes(32).toString("base64url");
   const verifier = provider.usesPkce ? randomBytes(32).toString("base64url") : undefined;

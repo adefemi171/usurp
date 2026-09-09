@@ -80,9 +80,9 @@ export async function GET(
     return fail("signin_failed");
   }
 
-  // A brand-new account lands on settings to confirm its derived handle;
-  // a returning user goes where they were headed.
-  const destination = created ? "/settings?welcome=1" : flow.returnTo;
+  // Preserve device approval across first-time sign-in; handle setup can wait.
+  const pairingReturn = flow.returnTo.startsWith("/connect/approve?");
+  const destination = created && !pairingReturn ? "/settings?welcome=1" : flow.returnTo;
   const response = NextResponse.redirect(new URL(destination, baseUrl()), { status: 302 });
 
   setSessionCookie(response, session.token, session.expiresAt);
