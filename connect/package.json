@@ -1,0 +1,12 @@
+{
+  "name": "@adefemi171/usurp-connect",
+  "version": "0.1.0",
+  "description": "Local browser setup and background usage sync for Usurp",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": { "node": ">=22.13.0" },
+  "bin": { "usurp-connect": "dist/main.cjs" },
+  "files": ["dist", "README.md", "LICENSE"],
+  "optionalDependencies": { "@napi-rs/keyring": "1.2.0" },
+  "repository": { "type": "git", "url": "git+https://github.com/adefemi171/usurp.git", "directory": "connect" }
+}

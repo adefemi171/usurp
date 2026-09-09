@@ -1,27 +1,20 @@
 import { baseUrl } from "../../lib/env";
-
-function releaseUrl(key: string) {
-  const value = process.env[key];
-  // Operators enable a platform only after its signed release passes smoke tests.
-  return value && /^https:\/\/github\.com\/adefemi171\/usurp\/releases\/download\/[^/]+\/[^/?#]+$/.test(value) ? value : undefined;
-}
+import { InstallCommands } from "./install-commands";
 
 export default function ConnectPage() {
-  const downloads = [
-    ["Mac · Apple silicon", releaseUrl("USURP_CONNECT_MAC_ARM64_URL")],
-    ["Mac · Intel", releaseUrl("USURP_CONNECT_MAC_X64_URL")],
-    ["Windows", releaseUrl("USURP_CONNECT_WINDOWS_URL")],
-    ["Linux", releaseUrl("USURP_CONNECT_LINUX_URL")],
-  ];
+  const server = baseUrl();
+  const packageUrl = `${server}/downloads/usurp-connect-0.1.0.tgz`;
   return <main className="wrap narrow connect-page">
-    <section className="page-intro"><p className="eyebrow">Usurp Connect</p><h1>Your coding activity.<br/>Connected.</h1><p>A small companion for the computer where you code. No repository cloning, server, or Docker needed.</p></section>
-    <section className="settings-section"><h2>1. Get the companion</h2>
-      <div className="connect-options">{downloads.map(([label, url]) => url
-        ? <a className="button secondary" key={label} href={url}>{label}</a>
-        : <div className="connect-platform" key={label}><strong>{label}</strong><span>Not released yet</span></div>)}</div>
-      {!downloads.some(([,url]) => url) && <p className="field-hint">The desktop companion is in testing. Public installers will appear here after signing and release verification. The existing CLI remains available in Settings.</p>}
+    <section className="page-intro"><p className="eyebrow">Usurp Connect</p><h1>Your computer.<br/>Connected once.</h1><p>A lightweight local service keeps your coding usage in sync. Set it up in your browser—no app installer, repository cloning, or Docker.</p></section>
+    <section className="settings-section"><h2>1. Install and open</h2><p>On the computer where you code, install <a href="https://nodejs.org/en/download" target="_blank" rel="noopener noreferrer">Node.js 22.13 or newer</a>, then run these commands in your terminal.</p>
+      <InstallCommands packageUrl={packageUrl} server={server}/>
+      <p className="field-hint">The package comes from this Usurp deployment, not an unpublished npm registry name. It starts a background process and opens private controls on your computer. macOS and Windows use the OS keychain; Linux needs an unlocked Secret Service keyring.</p>
+      <p className="field-hint">macOS installation and syncing are verified. Windows and Linux support is experimental pending platform acceptance tests.</p>
+      <p className="field-hint"><a href="/downloads/usurp-connect-0.1.0.tgz" download>Download package</a> · <a href="/downloads/usurp-connect-0.1.0.tgz.sha256">SHA-256 checksum</a></p>
     </section>
-    <section className="settings-section"><h2>2. Open and approve</h2><p>Already installed? Open Usurp Connect, choose <strong>Connect account</strong>, and approve the matching code in your browser.</p><a className="button" href={`usurp-connect://open?server=${encodeURIComponent(baseUrl())}`}>Open Usurp Connect</a><p className="field-hint">If nothing opens, launch the installed app manually. Your website address is <code>{baseUrl()}</code>.</p></section>
-    <section className="settings-section"><h2>3. Choose what to sync</h2><p>Select your coding tools and history, then start syncing. Your device key stays in the OS keychain. Only usage summaries leave your computer, not conversations or code.</p><p>AgentsView is optional. Pause syncing at any time, or revoke this computer in Settings. Joining the global board is always a separate choice.</p></section><a href="/settings#devices">Back to devices &amp; sync</a>
+    <section className="settings-section"><h2>2. Connect your account</h2><p>In the local controls, choose <strong>Connect account</strong>, follow the approval link, and sign in here. Check that the codes match before approving.</p><p className="field-hint">Your website address is <code>{server}</code>. Registering a device does not upload anything. If you previously used the CLI, stop its sync job before switching to this separately paired service.</p></section>
+    <section className="settings-section"><h2>3. Choose sources and start syncing</h2><p>Select your coding tools, optionally include AgentsView or older history, and approve uploading. Choose <strong>Save choices &amp; start syncing</strong>. Wait for a confirmed upload, then open your usage dashboard.</p><p>Only usage summaries leave your computer—not prompts, code, or project names. Costs are estimates or source-calculated, not invoices. Global membership is a separate choice.</p></section>
+    <section className="settings-section"><h2>After setup</h2><p>Closing the local browser tab keeps the service running. It checks about every minute while your computer is awake and retries connection failures automatically. Enable <strong>Start when I sign in</strong> in local controls on macOS or Linux; Windows currently needs a manual start after login.</p><p>Run <code>usurp-connect</code> to reopen controls, <code>usurp-connect status</code> to check uploads, or <code>usurp-connect stop</code> to stop. Use <strong>Sync now</strong> in local controls for an immediate upload. The website’s Refresh view only reloads records already received.</p></section>
+    <a href="/settings#devices">Back to devices &amp; sync</a>
   </main>;
 }

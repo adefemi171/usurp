@@ -1,0 +1,20 @@
+import { build } from "esbuild";
+import { mkdir, copyFile, readFile, writeFile, rename } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+const here = dirname(fileURLToPath(import.meta.url));
+await mkdir(join(here, "dist"), { recursive: true });
+await build({ absWorkingDir: here, entryPoints: ["src/main.ts", "src/worker.ts"], outdir: "dist", outExtension: { ".js": ".cjs" }, platform: "node", target: "node22", format: "cjs", bundle: true,
+  external: ["@napi-rs/keyring"], alias: { "@usurp/protocol": join(here, "../packages/protocol/src/index.ts"), "@usurp/readers": join(here, "../packages/readers/src/index.ts") } });
+for (const name of ["index.html", "ui.js", "style.css"]) await copyFile(join(here, "src", name), join(here, "dist", name));
+await copyFile(join(here, "../LICENSE"), join(here, "LICENSE"));
+const downloads = join(here, "../apps/web/public/downloads");
+await mkdir(downloads, { recursive: true });
+const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", downloads], { cwd: here, encoding: "utf8" }))[0];
+const name = "usurp-connect-0.1.0.tgz";
+await rename(join(downloads, packed.filename), join(downloads, name));
+const sha = createHash("sha256").update(await readFile(join(downloads, name))).digest("hex");
+await writeFile(join(downloads, `${name}.sha256`), `${sha}  ${name}\n`);
+console.log(`Built standalone Connect package: ${name} (${packed.size} bytes), SHA-256 ${sha}`);

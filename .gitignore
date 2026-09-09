@@ -10,3 +10,6 @@ dist/
 *.log
 coverage/
 desktop/release/
+connect/LICENSE
+apps/web/public/downloads/*.tgz
+apps/web/public/downloads/*.sha256

@@ -1,4 +1,10 @@
-# Usurp Connect
+# Usurp Connect desktop preview
+
+The recommended installation flow now uses the [local browser service](../connect/README.md),
+not an Electron installer. `npm run build:connect` bundles a standalone package
+under `apps/web/public/downloads`; the Docker build includes it, and `/connect`
+provides deployment-specific installation commands. This document describes the
+older Electron preview, which remains available for development but is not released.
 
 The desktop companion replaces repository cloning for end users once signed
 installers are released. It reuses Usurp's existing readers and signed ingest;

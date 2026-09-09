@@ -1,0 +1,22 @@
+import { beforeEach, afterEach, it, expect, vi } from "vitest";
+import { mkdtemp, mkdir, readFile, writeFile, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+const context=vi.hoisted(()=>({home:"",calls:[] as string[][],fail:false}));
+vi.mock("node:os",async original=>({...await original<typeof import("node:os")>(),homedir:()=>context.home}));
+vi.mock("node:child_process",()=>({execFile:(cmd:string,args:string[],callback:Function)=>{context.calls.push([cmd,...args]);callback(context.fail&&args.includes("bootstrap")?new Error("unavailable"):null,{stdout:"",stderr:""});}}));
+import { setStartup, startupStatus, startupFile } from "./startup.js";
+const platform=process.platform;
+beforeEach(async()=>{context.home=await mkdtemp(join(tmpdir(),"usurp-startup-test-"));context.calls=[];context.fail=false;Object.defineProperty(process,"platform",{value:"darwin"});});
+afterEach(()=>Object.defineProperty(process,"platform",{value:platform}));
+it("writes a quoted per-user LaunchAgent and removes only its own entry",async()=>{
+  await setStartup(true,"/tmp/user folder/data","/tmp/user folder/main.cjs",43127);
+  expect((await startupStatus()).enabled).toBe(true);
+  const text=await readFile(startupFile(),"utf8");expect(text).toContain("<string>/tmp/user folder/main.cjs</string>");expect(text).toContain("<string>--no-open</string>");expect(text).not.toContain("<key>KeepAlive</key>");expect(context.calls.some(c=>c.includes("bootstrap"))).toBe(true);
+  expect((await stat(startupFile())).mode&0o777).toBe(0o600);
+  await setStartup(false,"unused","unused",43127);expect((await startupStatus()).enabled).toBe(false);
+});
+it("refuses to overwrite unmanaged startup files",async()=>{await mkdir(dirname(startupFile()),{recursive:true});await writeFile(startupFile(),"user-owned");await expect(setStartup(true,"data","entry",43127)).rejects.toThrow("unmanaged");expect(await readFile(startupFile(),"utf8")).toBe("user-owned");});
+it("rolls back the file if login manager rejects setup",async()=>{context.fail=true;await expect(setStartup(true,"data","entry",43127)).rejects.toThrow("Could not enable");expect((await startupStatus()).enabled).toBe(false);});
+it("generates escaped Linux systemd arguments and enables user service",async()=>{Object.defineProperty(process,"platform",{value:"linux"});await setStartup(true,"/tmp/space % directory","/tmp/connect/main.cjs",43127);expect(await readFile(startupFile(),"utf8")).toContain('"/tmp/space %% directory"');expect(context.calls.some(c=>c.join(" ")==="systemctl --user enable usurp-connect.service")).toBe(true);await setStartup(false,"","",43127);expect((await startupStatus()).enabled).toBe(false);});
+it("does not claim Windows login startup support",async()=>{Object.defineProperty(process,"platform",{value:"win32"});expect((await startupStatus()).supported).toBe(false);await expect(setStartup(true,"","",43127)).rejects.toThrow("supported");});

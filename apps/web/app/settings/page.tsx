@@ -222,7 +222,7 @@ export default async function SettingsPage({
             <tr>
               <th scope="col">Device</th>
               <th scope="col">Trust</th>
-              <th scope="col">Last seen</th>
+              <th scope="col">Last upload</th>
               <th scope="col" />
             </tr>
           </thead>
@@ -239,7 +239,7 @@ export default async function SettingsPage({
                     {d.revokedAt ? "revoked" : d.trustTier.replace("_", " ")}
                   </span>
                 </td>
-                <td className="num sub">{ago(d.lastSeenAt)}</td>
+                <td className="num sub">{d.lastSeenAt ? ago(d.lastSeenAt) : d.revokedAt ? "No uploads" : "Registered · awaiting first sync"}</td>
                 <td>
                   {!d.revokedAt && (
                     <form action={revokeDeviceAction}>
@@ -256,7 +256,7 @@ export default async function SettingsPage({
         </table></div>
       )}
 
-      <details className="auth-options"><summary>Advanced: connect with the CLI</summary><p>Until signed desktop installers are released, the CLI is the available setup path. Install Node.js 22 or newer, then run:</p><pre><code>{"git clone https://github.com/adefemi171/usurp.git\ncd usurp\nnpm ci\nnpm run build"}</code></pre><p>Create a one-time code and run its command from that folder.</p><div style={{ marginTop: 18 }}>
+      <details className="auth-options"><summary>Advanced: connect with the source CLI</summary><p>Most users should use <a href="/connect">Usurp Connect</a> for automatic background sync without cloning. For source development, install Node.js 22 or newer, then run:</p><pre><code>{"git clone https://github.com/adefemi171/usurp.git\ncd usurp\nnpm ci\nnpm run build"}</code></pre><p>Create a one-time code and run its command from that folder.</p><div style={{ marginTop: 18 }}>
         <EnrollButton />
       </div></details>
 
@@ -265,7 +265,7 @@ export default async function SettingsPage({
           Nothing will appear on a board until at least one device syncs.
         </p>
       )}
-      <details className="auth-options"><summary>How to sync your activity</summary><p>From your Usurp source folder, run <code>npm run usurp -- sync</code>. To include older activity, use <code>npm run usurp -- sync --all</code>.</p><p>Already using AgentsView? Add <code>--agentsview http://localhost:8080</code> to your sync command. The bridge is optional; built-in readers work without it.</p></details>
+      <details className="auth-options"><summary>How to sync your activity</summary><p>With Usurp Connect, approve your selected sources and save them in the local browser controls. It uploads automatically; use its <strong>Sync now</strong> button for an immediate check. Registered does not mean synced: look for a last upload above.</p><p>Website Refresh view only reloads stored data. It cannot read local files or wake an offline computer.</p><p>Source CLI users can run <code>npm run usurp -- sync</code>, or add <code>--all</code> for older history and <code>--agentsview http://localhost:8080</code> for the optional bridge.</p></details>
       </section>
 
       {/* ── arenas ── */}

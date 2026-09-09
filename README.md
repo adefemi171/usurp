@@ -12,10 +12,12 @@ the per-user drill-down, OAuth sign-in, handles, per-arena visibility, clubs via
 invite code, and self-service device enrollment. Hosted GitHub sign-in has been
 verified; Google requires deployment-specific credentials and its own live check.
 
-**Usurp Connect is a desktop preview, not a public installer release.** It adds
-browser-approved device pairing, source consent and background sync using the
-existing readers. See [the companion guide](docs/usurp-connect.md) for development,
-testing and signing requirements. `/connect` keeps unavailable downloads disabled.
+**Usurp Connect now has a browser-based local service.** Install the standalone
+package offered by your deployment's `/connect` page, approve device pairing,
+choose sources, and let it sync in the background. Node.js 22.13+ is required;
+repository cloning, Docker, and a signed desktop app are not. See the
+[service guide](connect/README.md). The Electron app remains a separate unsigned
+preview; [its guide](docs/usurp-connect.md) covers desktop testing and signing.
 
 **M2's ship gate has passed.** `SPEC.md#4.4` requires proving in simulation that
 consistency × efficiency beats volume, with `#1` saying kill the project if it

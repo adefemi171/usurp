@@ -14,7 +14,9 @@
   ],
   "scripts": {
     "build": "tsc -b",
-    "build:web": "npm run build && npm -w @usurp/web run build",
+    "build:web": "npm run build && npm run build:connect && npm -w @usurp/web run build",
+    "build:connect": "node connect/build.mjs",
+    "typecheck:connect": "tsc -p connect/tsconfig.json",
     "dev": "tsc -b --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -32,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "esbuild": "0.28.2",
     "typescript": "^5.7.2",
     "vitest": "^5.0.0"
   }

@@ -26,9 +26,12 @@ COPY tsconfig.base.json tsconfig.json ./
 COPY packages ./packages
 COPY apps ./apps
 COPY scripts ./scripts
+COPY connect ./connect
+COPY LICENSE ./LICENSE
 
 # Project references build protocol -> readers -> db -> cli in order.
 RUN npx tsc -b
+RUN npm run build:connect
 
 # Next needs the workspace dists to already exist; `tsc -b` above provides them.
 RUN --mount=type=cache,target=/root/.cache/next-swc npm -w @usurp/web run build
@@ -68,6 +71,7 @@ COPY --from=build /app/packages/cli/dist ./packages/cli/dist
 COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 
 COPY --from=build /app/apps/web/.next ./apps/web/.next
+COPY --from=build /app/apps/web/public ./apps/web/public
 COPY --from=build /app/apps/web/next.config.ts ./apps/web/
 COPY --from=build /app/scripts ./scripts
 
