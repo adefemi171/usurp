@@ -14,7 +14,7 @@
  * construction because it was valid the first time.
  */
 
-import { and, eq, ne, sql, inArray } from "drizzle-orm";
+import { and, eq, ne, or, sql, inArray } from "drizzle-orm";
 import {
   runGates,
   verifyPayload,
@@ -189,20 +189,17 @@ export async function ingest(
     const duplicateBackfill: IngestRejection[] = [];
 
     if (suspectIndexes.length > 0) {
+      // One round trip for the whole batch, rather than one cross-region query
+      // per hour. Match the same (hour, agent, model) scope as the old lookup.
+      const clashes = await tx.select({ deviceId: usageEvents.deviceId,
+        hour: usageEvents.hour, agent: usageEvents.agent, model: usageEvents.model })
+        .from(usageEvents).where(and(eq(usageEvents.userId, device.userId),
+          ne(usageEvents.deviceId, device.id), or(...suspectIndexes.map(({ bucket }) =>
+            and(eq(usageEvents.hour, new Date(bucket.hour)), eq(usageEvents.agent, bucket.agent), eq(usageEvents.model, bucket.model))))));
+      const clashKey = (hour: Date, agent: string, model: string) => JSON.stringify([hour.toISOString(), agent, model]);
+      const byBucket = new Map(clashes.map(clash => [clashKey(clash.hour, clash.agent, clash.model), clash]));
       for (const { bucket, index } of suspectIndexes) {
-        const [clash] = await tx
-          .select({ deviceId: usageEvents.deviceId })
-          .from(usageEvents)
-          .where(
-            and(
-              eq(usageEvents.userId, device.userId),
-              eq(usageEvents.hour, new Date(bucket.hour)),
-              eq(usageEvents.agent, bucket.agent),
-              eq(usageEvents.model, bucket.model),
-              ne(usageEvents.deviceId, device.id),
-            ),
-          )
-          .limit(1);
+        const clash = byBucket.get(clashKey(new Date(bucket.hour), bucket.agent, bucket.model));
 
         if (clash) {
           rejectedIndexes.add(index);
@@ -245,13 +242,11 @@ export async function ingest(
       await tx.update(devices).set({ usageRevision: 2 }).where(eq(devices.id, device.id));
     }
 
-    let accepted = 0;
+    const rows: (typeof usageEvents.$inferInsert)[] = [];
     for (const [index, bucket] of payload.buckets.entries()) {
       if (rejectedIndexes.has(index)) continue;
 
-      await tx
-        .insert(usageEvents)
-        .values({
+      rows.push({
           userId: device.userId,
           deviceId: device.id,
           agent: bucket.agent,
@@ -275,7 +270,10 @@ export async function ingest(
           flags: flagsByIndex.get(index) ?? [],
           submittedAt: now,
           updatedAt: now,
-        })
+        });
+    }
+    const upsert = async (batch: (typeof usageEvents.$inferInsert)[]) => {
+      await tx.insert(usageEvents).values(batch)
         /**
          * `GREATEST`, not `DO NOTHING` and not overwrite.
          *
@@ -312,8 +310,19 @@ export async function ingest(
           },
         });
 
-      accepted++;
+    };
+    // Bound parameter counts. Repeated keys are flushed in original order so
+    // max-merge and last-write flags keep their prior semantics; PostgreSQL
+    // cannot update the same conflict key twice in one INSERT.
+    let batch: (typeof usageEvents.$inferInsert)[] = [];
+    const keys = new Set<string>();
+    for (const row of rows) {
+      if (batch.length === 200 || keys.has(row.dedupeKey)) {
+        await upsert(batch); batch = []; keys.clear();
+      }
+      batch.push(row); keys.add(row.dedupeKey);
     }
+    if (batch.length) await upsert(batch);
 
     if (payload.bridge) await tx.insert(usageBridgeSnapshots).values({ deviceId: device.id, snapshot: payload.bridge, importedAt: now })
       .onConflictDoUpdate({ target: usageBridgeSnapshots.deviceId,
@@ -327,7 +336,7 @@ export async function ingest(
 
     return {
       ok: true,
-      accepted,
+      accepted: rows.length,
       rejected: [...toRejections(gated.rejects), ...duplicateBackfill],
       flags: toRejections(gated.flags),
     };

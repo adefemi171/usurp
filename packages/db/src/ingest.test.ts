@@ -313,6 +313,19 @@ describe.skipIf(!hasDb)("ingest", () => {
    * upsert has to merge rather than ignore or clobber.
    */
   describe("GREATEST upsert", () => {
+    it("bulk imports across chunk boundaries and preserves repeated-key max merge", async () => {
+      const buckets = Array.from({ length: 250 }, (_, i) => bucket({
+        hour: new Date(Date.parse(HOUR) - i * 3600_000).toISOString(),
+      }));
+      buckets.push(bucket({ hour: buckets[0]!.hour, calls: 9, input_tokens: 900 }));
+      buckets.push(bucket({ hour: buckets[0]!.hour, calls: 2, input_tokens: 100 }));
+      const result = await submit(envelope(buckets));
+      expect(result).toMatchObject({ ok: true, accepted: 252, rejected: [] });
+      const stored = await rows();
+      expect(stored).toHaveLength(250);
+      expect(stored.find(row => row.dedupeKey === buckets[0]!.dedupe_key)).toMatchObject({ calls: 9, inputTokens: 900 });
+    });
+
     it("is a true no-op for identical values", async () => {
       await submit(envelope([bucket()], { seq: 1 }));
       const before = await rows();
