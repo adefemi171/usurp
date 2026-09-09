@@ -31,6 +31,16 @@
 .card small { display: block; color: #77818f; font-size: 10px; line-height: 1.5; margin-top: 10px; }
 .highlight { border-color: #967440; background: linear-gradient(140deg, #262118, var(--panel) 85%); }
 .highlight strong { color: #ebc184; }
+.advice { margin-top: 22px; border: 1px solid #3f4b4c; border-radius: 14px; padding: 25px; background: linear-gradient(135deg, #17201f, var(--panel)); }
+.adviceLink { color: #d9c18e; text-decoration: none; font-size: 12px; white-space: nowrap; }
+.adviceLink:hover { color: #f5d9a4; text-decoration: underline; }
+.adviceGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.adviceGrid article { border: 1px solid #35403f; border-radius: 9px; padding: 16px; background: #121918; }
+.adviceGrid h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #dce5de; }
+.adviceGrid p { margin: 0 0 12px; color: #aab7b2; font-size: 12px; line-height: 1.6; }
+.adviceGrid strong { color: #d8c492; font-size: 11px; }
+.runewardLink { display: inline-block; color: #d9c18e; font-size: 12px; text-decoration: none; }
+.runewardLink:hover { color: #f5d9a4; text-decoration: underline; }
 .notice { margin: 14px 0 0; color: #bda482; font-size: 11px; display: flex; gap: 8px; align-items: baseline; }
 .notice span { color: var(--accent); }
 .archive { font-size: 11px; color: #84919f; margin: 7px 0 0; }

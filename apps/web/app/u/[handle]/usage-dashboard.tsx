@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { BoardWindow, UsageSeriesPoint } from "@usurp/db";
 import { agentName, chartDays, colorFor, compact, filterSeries, formatValue, money, number, percentage, sharesFor, summarizeSeries, treemap, sessionOnly, type Grouping, type Metric } from "./dashboard-data";
+import { efficiencyAdvice } from "./efficiency-advice";
 import styles from "./dashboard.module.css";
 
 const dateLabel = (day: string) => new Date(day).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -96,6 +97,9 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
     { label: "Reported input", value: totals.input, color: "#d8a657" },
     { label: "Output", value: totals.output, color: "#65a5f5" }];
   const cacheMax = Math.max(1, ...cache.map(c => c.value));
+  // Coaching is personal. Public profiles remain aggregate-usage views and do
+  // not reveal a member's optimization opportunities to other visitors.
+  const advice = isOwner ? efficiencyAdvice(filtered) : [];
   const cards = [
     { label: "Usage cost", value: costUnavailable ? "Unavailable" : money(totals.cost), hint: costUnavailable ? "No priced usage recorded" : hasBridge ? (hasNativeCost ? "AgentsView + native estimates" : "AgentsView · historical API rates") : "Native estimate · not a bill", highlight: metric === "cost" },
     { label: "Effective tokens", value: onlyMetadata ? "Unavailable" : compact(totals.tokens), hint: "Input + output + cache write", highlight: metric === "tokens" },
@@ -128,6 +132,13 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
     <div className={styles.cards} aria-label="Usage summary">{cards.map(c => <article className={`${styles.card} ${c.highlight ? styles.highlight : ""}`} key={c.label}>
       <p>{c.label}</p><strong>{c.value}</strong><small>{c.hint}</small>
     </article>)}</div>
+    {!!advice.length && <section className={styles.advice} aria-label="Efficiency coach">
+      <div className={styles.panelHeader}><div><h2>Efficiency coach</h2><p>Suggestions from aggregate usage only — never your prompts, code, projects, or commands.</p></div><a href="/connect" className={styles.adviceLink}>Local coaching ↗</a></div>
+      <div className={styles.adviceGrid}>{advice.map(item => <article key={item.id}>
+        <h3>{item.title}</h3><p>{item.detail}</p><strong>Try this:</strong><p>{item.action}</p>
+        {item.id === "local" && <a className={styles.runewardLink} href="https://runewardd.github.io/runeward/" target="_blank" rel="noopener noreferrer">Learn about Runeward governance ↗</a>}
+      </article>)}</div>
+    </section>}
     <details className={styles.coverage}>
       <summary><span>{totals.unpriced || missingUsage ? "Partial data coverage" : "Data sources & coverage"}</span><span>{onlyMetadata || !filtered.length ? "No measured usage" : unpricedModels.length ? `${unpricedModels.length} unpriced model${unpricedModels.length === 1 ? "" : "s"}` : "All measured usage priced"}{metadataModels.length ? ` · ${metadataModels.length} metadata-only model${metadataModels.length === 1 ? "" : "s"}` : ""} <span aria-hidden="true">↗</span></span></summary>
       <div className={styles.coverageBody}>
