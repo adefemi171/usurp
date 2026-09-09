@@ -18,6 +18,7 @@ describe("AgentsView bridge", () => {
   it("imports source money unchanged and excludes private fields", async () => {
     const request = mockFetch(); const s = await fetchBridgeSnapshot("http://localhost:8080", request);
     expect(s.rows[0]).toMatchObject({ costMicros: 123456, cacheReadTokens: 500, costAvailable: true });
+    expect(s.sourceId).toBe("agentsview:local:8080");
     expect(s.rows).toHaveLength(1);
     expect(JSON.stringify(s)).not.toContain("DO_NOT_UPLOAD");
     expect(JSON.stringify(s)).not.toContain("calls");
@@ -41,6 +42,11 @@ describe("AgentsView bridge", () => {
   it("preserves the local service authority through Docker's transport", async () => {
     const request = mockFetch(); await fetchBridgeSnapshot("http://host.docker.internal:8080", request);
     expect(vi.mocked(request).mock.calls[0]?.[1]).toMatchObject({ redirect: "error", headers: { host: "localhost:8080" } });
+  });
+  it("gives local aliases the same source identity", async () => {
+    const local = await fetchBridgeSnapshot("http://localhost:8080", mockFetch());
+    const loopback = await fetchBridgeSnapshot("http://127.0.0.1:8080", mockFetch());
+    expect(loopback.sourceId).toBe(local.sourceId);
   });
   it("signs the snapshot including costs and timestamps", async () => {
     const bridge = await fetchBridgeSnapshot("http://localhost:8080", mockFetch());

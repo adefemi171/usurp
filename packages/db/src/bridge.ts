@@ -17,16 +17,43 @@ export async function saveOwnedBridge(db: Db, userId: string, deviceId: string, 
 }
 
 type Native = UsageSeriesPoint & { deviceId: string };
+type StoredSnapshot = { deviceId: string; snapshot: BridgeSnapshot };
+type SnapshotGroup = { selected: StoredSnapshot; deviceIds: Set<string> };
+
+/**
+ * A bridge is a full account-level AgentsView export, rather than a device
+ * counter. Prefer the newest copy from a stable local source, so installing
+ * Connect beside the CLI cannot double a user's historical usage. Before
+ * source IDs were introduced, there is no safe way to tell two full exports
+ * apart, so treat legacy snapshots as one source and prefer its newest copy.
+ */
+function distinctSnapshots(snapshots: StoredSnapshot[]): SnapshotGroup[] {
+  const bySource = new Map<string, SnapshotGroup>();
+  for (const entry of snapshots) {
+    const sourceId = entry.snapshot.sourceId ?? "legacy:agentsview";
+    const existing = bySource.get(sourceId);
+    if (!existing) {
+      bySource.set(sourceId, { selected: entry, deviceIds: new Set([entry.deviceId]) });
+      continue;
+    }
+    existing.deviceIds.add(entry.deviceId);
+    if (existing.selected.snapshot.fetchedAt < entry.snapshot.fetchedAt) existing.selected = entry;
+  }
+  return [...bySource.values()];
+}
+
 /** Replace covered device/agent analytics, not hourly source records. Never max-merge costs. */
 export function mergeBridgeSeries(native: Native[], snapshots: Array<{ deviceId: string; snapshot: BridgeSnapshot }>, since?: string): UsageSeriesPoint[] {
-  const covered = new Map(snapshots.map(s => [s.deviceId, s.snapshot]));
+  const selectedSnapshots = distinctSnapshots(snapshots);
+  const covered = new Map<string, BridgeSnapshot>();
+  for (const group of selectedSnapshots) for (const deviceId of group.deviceIds) covered.set(deviceId, group.selected.snapshot);
   const rows: UsageSeriesPoint[] = native.filter(r => {
     const snapshot = covered.get(r.deviceId);
     // Full-history snapshots own covered agents through their import day. We
     // intentionally do not splice newer native costs into that same day.
     return !snapshot || !snapshot.agents.includes(r.agent) || r.day > snapshot.fetchedAt.slice(0, 10);
   }).map(({ deviceId: _, ...r }) => ({ ...r, source: "native" as const }));
-  for (const { snapshot } of snapshots) for (const r of snapshot.rows) {
+  for (const { selected: { snapshot } } of selectedSnapshots) for (const r of snapshot.rows) {
     if (since && r.day < since) continue;
     rows.push({ ...r, effectiveTokens: r.inputTokens + r.outputTokens + r.cacheWriteTokens,
       calls: 0, sessionsStarted: 0, sessionsCompleted: 0, sessionsAbandoned: 0,

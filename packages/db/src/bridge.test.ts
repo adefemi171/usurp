@@ -29,6 +29,18 @@ describe("preferred-source analytics", () => {
     const rows = mergeBridgeSeries([native(), native("codex", "b")], [{ deviceId: "a", snapshot: snapshot() }]);
     expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ costMicros: 300, source: "mixed", callsAvailable: false });
   });
+  it("uses the newest snapshot from the same local AgentsView source", () => {
+    const old = { ...snapshot(100), sourceId: "agentsview:local:8080" as const, fetchedAt: "2026-09-08T12:00:00.000Z" };
+    const fresh = { ...snapshot(250), sourceId: "agentsview:local:8080" as const, fetchedAt: "2026-09-09T12:00:00.000Z" };
+    const rows = mergeBridgeSeries([], [{ deviceId: "old-cli", snapshot: old }, { deviceId: "connect", snapshot: fresh }]);
+    expect(rows).toHaveLength(1); expect(rows[0]?.costMicros).toBe(250);
+  });
+  it("uses only the newest legacy full export and replaces both clients' native overlap", () => {
+    const old = { ...snapshot(100), fetchedAt: "2026-09-08T12:00:00.000Z", rows: [{ ...snapshot().rows[0]!, day: "2026-09-08" }] };
+    const fresh = snapshot(200);
+    const rows = mergeBridgeSeries([native("codex", "a"), native("codex", "b")], [{ deviceId: "a", snapshot: old }, { deviceId: "b", snapshot: fresh }]);
+    expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ costMicros: 200, source: "agentsview" });
+  });
   it("keeps snapshot precedence until its import day, then permits native fallback", () => {
     const rows = mergeBridgeSeries([{ ...native(), day: "2026-09-10" }], [{ deviceId: "a", snapshot: snapshot() }], "2026-09-10");
     expect(rows).toHaveLength(1); expect(rows[0]?.source).toBe("native");

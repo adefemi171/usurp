@@ -33,6 +33,8 @@ export const bridgeRowSchema = z.object({
 export const bridgeSnapshotSchema = z.object({
   source: z.literal("agentsview"), schemaVersion: z.literal(6),
   fetchedAt: z.string().datetime(), timezone: z.literal("UTC"),
+  /** Stable, non-sensitive identity of the configured local summary service. */
+  sourceId: z.string().regex(/^agentsview:local:\d+$/).optional(),
   pricingVersion: z.string().max(256), costBasis: z.literal("source-calculated"),
   agents: z.array(z.string().min(1).max(64)).min(1).max(64),
   rows: z.array(bridgeRowSchema).min(1).max(10000),
@@ -73,6 +75,10 @@ export function bridgeUrl(raw: string): URL {
 /** Read only usage summaries; project/session fields are discarded at this boundary. */
 export async function fetchBridgeSnapshot(raw: string, request: typeof fetch = fetch): Promise<BridgeSnapshot> {
   const base = bridgeUrl(raw);
+  // All permitted hosts address the caller's own machine.  Canonicalizing the
+  // host means localhost, 127.0.0.1, and Docker's gateway identify the same
+  // AgentsView service when more than one Usurp sync client is installed.
+  const sourceId = `agentsview:local:${base.port || (base.protocol === "https:" ? "443" : "80")}`;
   const signal = AbortSignal.timeout(20_000);
   async function summary(agent?: string) {
     const url = new URL("/api/v1/usage/summary", base);
@@ -123,5 +129,5 @@ export async function fetchBridgeSnapshot(raw: string, request: typeof fetch = f
       rows.reduce((n, r) => n + r.costMicros, 0) !== overall.totals.totalCost.microdollars)
     throw new Error("AgentsView daily totals do not reconcile; previous snapshot retained");
   return bridgeSnapshotSchema.parse({ source: "agentsview", schemaVersion: 6, fetchedAt: new Date().toISOString(),
-    timezone: "UTC", pricingVersion: overall.pricing.table_version, costBasis: "source-calculated", agents, rows });
+    timezone: "UTC", sourceId, pricingVersion: overall.pricing.table_version, costBasis: "source-calculated", agents, rows });
 }
