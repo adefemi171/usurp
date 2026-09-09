@@ -7,6 +7,16 @@ import { useRouter } from "next/navigation";
 export default function LiveRefresh() {
   const router = useRouter();
   const [enabled, setEnabled] = useState(false);
+  const [restored, setRestored] = useState(false);
+  // A client-side metric change preserves this component, and session storage
+  // also preserves the explicit choice if a browser has to reload the route.
+  useEffect(() => {
+    setEnabled(window.sessionStorage.getItem("usurp:auto-refresh") === "on");
+    setRestored(true);
+  }, []);
+  useEffect(() => {
+    if (restored) window.sessionStorage.setItem("usurp:auto-refresh", enabled ? "on" : "off");
+  }, [enabled, restored]);
   useEffect(() => {
     if (!enabled) return;
     const timer = setInterval(() => {

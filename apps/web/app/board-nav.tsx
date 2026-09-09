@@ -11,6 +11,7 @@
  */
 
 import type { BoardWindow } from "@usurp/db";
+import Link from "next/link";
 
 export type BoardMetric = "burn" | "rating";
 
@@ -44,20 +45,22 @@ export default function BoardNav({
   return (
     <div className="board-controls">
       <nav className="controls" aria-label="Board">
-        <a
+        <Link
           className="tab"
           href={`?metric=rating${anchor}`}
+          scroll={false}
           aria-current={metric === "rating" ? "true" : undefined}
         >
           Rating
-        </a>
-        <a
+        </Link>
+        <Link
           className="tab"
           href={`?metric=burn&window=${window}${anchor}`}
+          scroll={false}
           aria-current={metric === "burn" ? "true" : undefined}
         >
           Burn
-        </a>
+        </Link>
         {/* `#5.1` — a second axis to compete on, so being dethroned still
             leaves a record. Reachable from the board it matters on. */}
       </nav>
@@ -65,14 +68,15 @@ export default function BoardNav({
       {metric === "burn" && (
         <nav className="controls" aria-label="Window">
           {WINDOWS.map((w) => (
-            <a
+            <Link
               key={w.key}
               className="tab small"
               href={`?metric=burn&window=${w.key}${anchor}`}
+              scroll={false}
               aria-current={w.key === window ? "true" : undefined}
             >
               {w.label}
-            </a>
+            </Link>
           ))}
         </nav>
       )}

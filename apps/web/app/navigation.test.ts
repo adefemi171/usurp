@@ -31,7 +31,7 @@ describe("application navigation", () => {
   it("does not offer time-window controls for seasonal ratings", () => {
     const html = renderToStaticMarkup(createElement(BoardNav, { metric: "rating", window: "all" }));
     expect(html).not.toContain('aria-label="Window"');
-    expect(html).toContain('aria-current="true">Rating');
+    expect(html).toMatch(/<a[^>]*aria-current="true"[^>]*>Rating<\/a>/);
   });
   it("provides recovery links without revealing whether a private profile exists", () => {
     const html = renderToStaticMarkup(createElement(NotFound));
