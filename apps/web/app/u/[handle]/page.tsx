@@ -14,10 +14,13 @@ export default async function UserPage({ params, searchParams }: {
   const [{ handle }, query] = await Promise.all([params, searchParams]);
   const raw = Array.isArray(query.window) ? query.window[0] : query.window;
   const window: BoardWindow = raw === "all" || raw === "day" || raw === "month" ? raw : "week";
-  // Apply the public-membership gate before serializing any analytics.
-  const profile = await userProfile(getDb(), decodeURIComponent(handle), { window, dailyAnalytics: true });
-  if (!profile) notFound();
+  // A trusted session allows self-access without making the profile public.
+  // All other visitors still pass the membership gate before analytics load.
   const viewer = await currentUser();
+  const profile = await userProfile(getDb(), decodeURIComponent(handle), {
+    window, dailyAnalytics: true, ...(viewer ? { viewerId: viewer.id } : {}),
+  });
+  if (!profile) notFound();
   const isOwner = viewer?.handle?.toLowerCase() === profile.handle.toLowerCase();
   const canRefreshSource = !!(isOwner && viewer && await ownedBridge(viewer.id));
   return <main className={styles.dashboard}>

@@ -2,6 +2,9 @@
 
 This is a small community preview, not reliable always-on production hosting.
 
+Demo: https://usurp.onrender.com. The initial free database expires on
+October 9, 2026. GitHub sign-in uses a separate hosted-demo OAuth app.
+
 ## Services
 
 - One Free Docker web service, repository root as build context.
@@ -31,8 +34,9 @@ Keep local OAuth credentials separate so local sign-in keeps working.
 
 ## Joining and syncing
 
-1. Sign in with GitHub, confirm your handle, and opt into the global arena in
-   Settings. Signing in alone never publishes your activity.
+1. Sign in with GitHub and confirm your handle. Your own usage dashboard is
+   accessible without joining an arena. Opt into the global arena in Settings
+   only if you want to compete. Signing in alone never publishes your activity.
 2. Clone the repository locally, install Node 22+, run `npm ci` and
    `npm run build`. You do not need a local server or database.
 3. Choose **Add a device** and run its generated login command. It includes

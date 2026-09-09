@@ -110,6 +110,26 @@ describe.skipIf(!hasDb)("userProfile", () => {
     db.update(arenaMembers).set({ visibility }).where(eq(arenaMembers.userId, userId));
 
   describe("the visibility gate", () => {
+    it.each(["anonymous", "hidden"] as const)("allows only the owner of a %s profile", async (visibility) => {
+      await submit([bucket()], 1);
+      await setVisibility(visibility);
+      const own = await userProfile(db, handle, { window: "all", now: NOW, viewerId: userId });
+      expect(own?.totals.calls).toBe(5);
+      expect(own?.arenas).toEqual([]);
+      expect(await userProfile(db, handle, { viewerId: "not-the-owner" })).toBeUndefined();
+      expect(await userProfile(db, handle)).toBeUndefined();
+    });
+
+    it("lets a new account see its own empty dashboard without joining an arena", async () => {
+      await db.delete(arenaMembers).where(eq(arenaMembers.userId, userId));
+      const own = await userProfile(db, handle, { viewerId: userId });
+      expect(own?.handle).toBe(handle);
+      expect(own?.usageSeries).toEqual([]);
+      expect(own?.arenas).toEqual([]);
+      expect(await userProfile(db, handle)).toBeUndefined();
+      expect(await userProfile(db, handle, { viewerId: "not-the-owner" })).toBeUndefined();
+    });
+
     it("serves a public member", async () => {
       await submit([bucket()], 1);
       const profile = await userProfile(db, handle, { window: "all", now: NOW });

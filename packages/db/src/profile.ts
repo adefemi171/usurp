@@ -7,7 +7,8 @@
  * reads.
  *
  * ── Visibility is a hard gate, not a filter ─────────────────────────────────
- * A profile is served only for a user who is `public` in at least one arena.
+ * Visitors can see only users who are `public` in at least one arena.
+ * The authenticated owner can always read their own usage, without competing.
  * An `anonymous` member gets a 404, not a redacted page: `#2` promises they
  * compete under a stable pseudonym, and a profile reachable at `/u/<handle>`
  * would deanonymize them to anyone who guesses the handle — the pseudonym is
@@ -131,6 +132,8 @@ const effective = sql<number>`
 `;
 
 export interface ProfileOptions {
+  /** Trusted server-session user ID only; never accept this from request input. */
+  viewerId?: string;
   /** Dashboard uses complete UTC days; daily bridges cannot resolve rolling hours. */
   dailyAnalytics?: boolean;
   window?: BoardWindow;
@@ -172,7 +175,7 @@ export async function userProfile(
       ),
     );
 
-  if (visibleArenas.length === 0) return undefined;
+  if (visibleArenas.length === 0 && options.viewerId !== user.id) return undefined;
 
   const scope = since
     ? and(eq(usageEvents.userId, user.id), gte(usageEvents.hour, since))
