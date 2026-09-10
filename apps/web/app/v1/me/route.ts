@@ -48,7 +48,7 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json({
     handle: auth.user.handle,
     handle_confirmed: auth.user.handleConfirmed,
-    display_name: auth.user.displayName,
+    display_name: null,
     avatar_url: auth.user.avatarUrl,
     email_domain: auth.user.emailDomain,
     // `#3.4` — a shadow-frozen user is told, rather than left wondering why

@@ -12,6 +12,7 @@
 
 import type { BoardWindow } from "@usurp/db";
 import Link from "next/link";
+import NavigationPending from "./navigation-pending";
 
 export type BoardMetric = "burn" | "rating";
 export type TrustFilter =
@@ -66,6 +67,7 @@ export default function BoardNav({
           aria-current={metric === "rating" ? "true" : undefined}
         >
           Rating
+          <NavigationPending />
         </Link>
         <Link
           className="tab"
@@ -74,6 +76,7 @@ export default function BoardNav({
           aria-current={metric === "burn" ? "true" : undefined}
         >
           Burn
+          <NavigationPending />
         </Link>
         {/* `#5.1` — a second axis to compete on, so being dethroned still
             leaves a record. Reachable from the board it matters on. */}
@@ -90,6 +93,7 @@ export default function BoardNav({
               aria-current={w.key === window ? "true" : undefined}
             >
               {w.label}
+              <NavigationPending />
             </Link>
           ))}
         </nav>

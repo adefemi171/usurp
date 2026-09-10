@@ -140,19 +140,56 @@ try {
     .where(inArray(users.handle, [aName, bName]));
   const now = new Date(),
     season = await ensureCurrentSeason(db, club.id, now);
-  await db
-    .insert(dailyScores)
-    .values(
-      people.map((user) => ({
-        userId: user.id,
-        day: startOfUtcDay(now),
-        volumePts: 500,
-        efficiencyMultBp: 10000,
-        streakMultBp: 10000,
-        points: 500,
-      })),
-    );
+  // A zero-point board already exists before the first successful sync.
   await recomputeStandings(db, club.id, season, now);
+  await db
+    .update(users)
+    .set({ displayName: "Never Publish This Legal Name" })
+    .where(inArray(users.handle, [aName, bName]));
+  await db.insert(dailyScores).values(
+    people.map((user) => ({
+      userId: user.id,
+      day: startOfUtcDay(now),
+      volumePts: 500,
+      efficiencyMultBp: 10000,
+      streakMultBp: 10000,
+      points: 500,
+    })),
+  );
+  await recomputeStandings(db, club.id, season, now);
+  for (const path of [
+    `/v1/arenas/${club.slug}/board?metric=burn`,
+    `/v1/arenas/${club.slug}/board?metric=rating`,
+    `/u/${aName}?window=all`,
+    `/a/${club.slug}?metric=rating`,
+    "/v1/me",
+    "/halls/longest-reign",
+  ]) {
+    const response = await a(path);
+    assert.equal(response.status, 200, path);
+    const body = await response.text();
+    assert(
+      !body.includes("Never Publish This Legal Name"),
+      `Real name leaked in ${path}`,
+    );
+    if (path.includes("/a/")) {
+      assert(
+        body.includes("Sovereign"),
+        "Two-member rating board needs a title",
+      );
+      assert(
+        body.includes("has held the Throne"),
+        "First scored sync must start a reign",
+      );
+    }
+    if (path === "/halls/longest-reign") {
+      assert(
+        body.includes("HTTP smoke club"),
+        "Reign must appear in the hall of fame",
+      );
+      assert(body.includes("reigning"));
+    }
+  }
   const challenge = {
     arena_id: club.id,
     opponent: bName,
@@ -204,7 +241,7 @@ try {
     0,
   );
   console.log(
-    "PASS: real HTTP sign-in, private routes, duel proposal/acceptance, CSRF, org proof/ownership, and account deletion",
+    "PASS: real HTTP sign-in, handle-only identity, two-member titles, first-sync reign and hall, private routes, duels, CSRF, org ownership, and account deletion",
   );
 } finally {
   if (arenaIds.length)

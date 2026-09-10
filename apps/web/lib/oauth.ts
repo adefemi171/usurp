@@ -107,7 +107,6 @@ const github: Provider = {
       // Numeric id, not the login: logins can be changed and reused.
       providerUid: String(user.id),
       ...(user.login ? { username: user.login } : {}),
-      ...(user.name ? { displayName: user.name } : {}),
       ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
       ...(email ? { email } : {}),
     };
@@ -146,7 +145,6 @@ const google: Provider = {
       provider: "google",
       providerUid: info.sub,
       ...(info.email ? { username: info.email.split("@")[0]! } : {}),
-      ...(info.name ? { displayName: info.name } : {}),
       ...(info.picture ? { avatarUrl: info.picture } : {}),
       // Unverified addresses are dropped rather than stored.
       ...(info.email && info.email_verified !== false ? { email: info.email } : {}),
@@ -184,7 +182,6 @@ const dev: Provider = {
       // Stable per handle, so signing in twice as "kenn" is the same account.
       providerUid: `dev:${username}`,
       username,
-      displayName: username,
       email: `${username}@dev.local`,
     };
   },

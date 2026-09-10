@@ -181,6 +181,17 @@ export default async function RatingView({
                       </span>
                     )}
                     <TitleBadge title={row.title} />
+                    {!row.title && !row.eliminated && (
+                      <span className="sub">
+                        {row.underReview
+                          ? "Under review"
+                          : row.trustTier === "unverified"
+                            ? "Not eligible"
+                            : row.points === 0
+                              ? "Awaiting points"
+                              : "Challenger"}
+                      </span>
+                    )}
                     {row.title === "sovereign" && board.throne && (
                       <span
                         className="held"

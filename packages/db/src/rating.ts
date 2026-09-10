@@ -376,7 +376,15 @@ export async function recomputeStandings(
     // they are read back and added in rather than recomputed. Writing `points`
     // without them would erase every wager at the next run.
     const duelPtsByUser = new Map(previous.map((p) => [p.userId, p.duelPts]));
-    const previousLeader = previous.find((p) => p.rank === 1)?.userId ?? null;
+    // Rank one at zero points is not an incumbent. Compare the actual open
+    // reign, otherwise the first sync by the same rank-one user never crowns
+    // them and every later recompute keeps updating a nonexistent reign.
+    const [openReign] = await tx
+      .select()
+      .from(reigns)
+      .where(and(eq(reigns.arenaId, arenaId), isNull(reigns.endedAt)))
+      .limit(1);
+    const previousLeader = openReign?.userId ?? null;
 
     const byUserDay = new Map<string, number>();
     for (const s of scores) {
@@ -438,7 +446,7 @@ export async function recomputeStandings(
         prevRank: prevRankByUser.get(t.userId) ?? null,
         eliminated: isEliminated,
         title:
-          contentionRank === null
+          contentionRank === null || Math.round(t.points) <= 0
             ? undefined
             : titleForRank(contentionRank, contenders),
       };
@@ -478,12 +486,6 @@ export async function recomputeStandings(
     let usurped: RecomputeStandingsResult["usurped"];
 
     if (newLeaderId && newLeaderId !== previousLeader) {
-      const [openReign] = await tx
-        .select()
-        .from(reigns)
-        .where(and(eq(reigns.arenaId, arenaId), isNull(reigns.endedAt)))
-        .limit(1);
-
       // `#6.2` — reigns are append-only. Close the old one, open a new one;
       // never rewrite either, even if late data would have prevented this.
       if (openReign) {
@@ -570,7 +572,7 @@ export async function seasonStandings(
       prevRank: r.prevRank,
       eliminated: isEliminated,
       title:
-        contentionRank === null
+        contentionRank === null || r.points <= 0
           ? undefined
           : titleForRank(contentionRank, contenders),
     };
@@ -662,14 +664,25 @@ export async function ratingBoard(
     .limit(1);
   if (!arena) return undefined;
 
-  const season = await ensureCurrentSeason(db, arena.id, now);
-  const sovereign = await currentSovereign(db, arena.id);
+  // Independent reads must not incur consecutive remote database round trips.
+  const [season, sovereign, [memberTally]] = await Promise.all([
+    ensureCurrentSeason(db, arena.id, now),
+    currentSovereign(db, arena.id),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(arenaMembers)
+      .where(
+        and(
+          eq(arenaMembers.arenaId, arena.id),
+          sql`${arenaMembers.status} <> 'left'`,
+        ),
+      ),
+  ]);
 
   const rows = await db
     .select({
       userId: standings.userId,
       handle: users.handle,
-      displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       points: standings.points,
       rank: standings.rank,
@@ -699,16 +712,6 @@ export async function ratingBoard(
 
   // Members who have never scored have no `standings` row yet, so the join
   // above misses them. Count membership directly or a fresh club looks empty.
-  const [memberTally] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(arenaMembers)
-    .where(
-      and(
-        eq(arenaMembers.arenaId, arena.id),
-        sql`${arenaMembers.status} <> 'left'`,
-      ),
-    );
-
   // `#5.2` — titles go by position among members still in contention, so an
   // eliminated member keeps their place on the board without being Sovereign.
   const contenders = visible.filter(
@@ -731,7 +734,7 @@ export async function ratingBoard(
     return {
       userId: r.userId,
       handle: anonymous ? null : r.handle,
-      displayName: anonymous ? null : r.displayName,
+      displayName: null,
       avatarUrl: anonymous ? null : r.avatarUrl,
       pseudonym: anonymous ? pseudonymFor(r.userId) : null,
       points: r.points,
@@ -745,7 +748,7 @@ export async function ratingBoard(
       underReview: r.reviewState === "shadow_frozen",
       eliminated,
       title:
-        contentionRank === null
+        contentionRank === null || r.points <= 0
           ? undefined
           : titleForRank(contentionRank, contenders),
     };

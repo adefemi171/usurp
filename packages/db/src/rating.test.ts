@@ -9,10 +9,24 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { and, desc, eq } from "drizzle-orm";
 import { closeDb, getDb } from "./client.js";
-import { arenaMembers, arenas, dailyScores, events, reigns, standings, users } from "./schema.js";
+import {
+  arenaMembers,
+  arenas,
+  dailyScores,
+  events,
+  reigns,
+  standings,
+  users,
+} from "./schema.js";
 import { recomputeStandings, seasonStandings } from "./rating.js";
 import { ratingBoard } from "./rating.js";
-import { ensureCurrentSeason, seasonDays, startOfUtcDay, addDays, SEASON_LENGTH_DAYS } from "./seasons.js";
+import {
+  ensureCurrentSeason,
+  seasonDays,
+  startOfUtcDay,
+  addDays,
+  SEASON_LENGTH_DAYS,
+} from "./seasons.js";
 import { titleForRank } from "./titles.js";
 import { signInWithOAuth } from "./auth.js";
 import { setVisibility } from "./arenas.js";
@@ -29,9 +43,10 @@ describe("titleForRank", () => {
     expect(titleForRank(5, 10)).toBeUndefined();
   });
 
-  it("withholds titles in an arena too small for them to mean anything", () => {
-    // "Sovereign" of two people is just "the other one".
-    expect(titleForRank(1, 2)).toBeUndefined();
+  it("awards titles in two-person arenas but not solo arenas", () => {
+    expect(titleForRank(1, 2)).toBe("sovereign");
+    expect(titleForRank(2, 2)).toBe("usurper");
+    expect(titleForRank(0, 2)).toBeUndefined();
     expect(titleForRank(1, 1)).toBeUndefined();
     expect(titleForRank(1, 3)).toBe("sovereign");
   });
@@ -78,7 +93,9 @@ describe.skipIf(!hasDb)("rating (database)", () => {
     createdArenas.push(arena!.id);
 
     for (const userId of memberIds) {
-      await db.insert(arenaMembers).values({ arenaId: arena!.id, userId, visibility: "public" });
+      await db
+        .insert(arenaMembers)
+        .values({ arenaId: arena!.id, userId, visibility: "public" });
     }
     return arena!;
   }
@@ -102,6 +119,37 @@ describe.skipIf(!hasDb)("rating (database)", () => {
   }
 
   describe("recomputeStandings", () => {
+    it("crowns the existing zero-point leader on their first scored sync", async () => {
+      const a = await newUser();
+      const b = await newUser();
+      const arena = await newArena([a.id, b.id]);
+      const season = await ensureCurrentSeason(db, arena.id, NOW);
+      const empty = await recomputeStandings(db, arena.id, season, NOW);
+      const leader = empty.rows[0]!;
+      expect(empty.rows.every((r) => !r.title)).toBe(true);
+      await setDay(leader.userId, NOW, 86);
+      const later = new Date(NOW.getTime() + 60_000);
+      const scored = await recomputeStandings(db, arena.id, season, later);
+      expect(scored.usurped).toEqual({
+        actorId: leader.userId,
+        targetId: null,
+      });
+      expect(scored.rows[0]?.title).toBe("sovereign");
+      expect(scored.rows[1]?.title).toBeUndefined();
+      await recomputeStandings(db, arena.id, season, later);
+      const history = await db
+        .select()
+        .from(reigns)
+        .where(eq(reigns.arenaId, arena.id));
+      expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({
+        userId: leader.userId,
+        startedAt: later,
+      });
+      const board = await ratingBoard(db, arena.slug, { now: later });
+      expect(board?.throne?.display).toBe(leader.handle);
+    });
+
     it("ranks members by season points and assigns titles", async () => {
       const [a, b, c] = [await newUser(), await newUser(), await newUser()];
       const arena = await newArena([a.id, b.id, c.id]);
@@ -132,14 +180,17 @@ describe.skipIf(!hasDb)("rating (database)", () => {
       const day0 = startOfUtcDay(season.startsAt);
 
       // Steady: 100 on each of the first three days.
-      for (let i = 0; i < 3; i++) await setDay(steady.id, addDays(day0, i), 100);
+      for (let i = 0; i < 3; i++)
+        await setDay(steady.id, addDays(day0, i), 100);
       // Bursty: all 300 on day one, then nothing — seven idle days to decay.
       await setDay(bursty.id, day0, 300);
 
       const result = await recomputeStandings(db, arena.id, season, NOW);
       const points = new Map(result.rows.map((r) => [r.handle, r.points]));
 
-      expect(points.get(steady.handle)!).toBeGreaterThan(points.get(bursty.handle)!);
+      expect(points.get(steady.handle)!).toBeGreaterThan(
+        points.get(bursty.handle)!,
+      );
       // Gross totals are identical; only the decay path differs.
       expect(points.get(bursty.handle)!).toBeLessThan(300);
     });
@@ -156,12 +207,26 @@ describe.skipIf(!hasDb)("rating (database)", () => {
 
       expect(result.usurped).toEqual({ actorId: a.id, targetId: null });
 
-      const [reign] = await db.select().from(reigns).where(eq(reigns.arenaId, arena.id));
-      expect(reign).toMatchObject({ userId: a.id, endedAt: null, peakPoints: 500 });
+      const [reign] = await db
+        .select()
+        .from(reigns)
+        .where(eq(reigns.arenaId, arena.id));
+      expect(reign).toMatchObject({
+        userId: a.id,
+        endedAt: null,
+        peakPoints: 500,
+      });
 
-      const [event] = await db.select().from(events).where(eq(events.arenaId, arena.id));
+      const [event] = await db
+        .select()
+        .from(events)
+        .where(eq(events.arenaId, arena.id));
       // Nobody was dethroned, so it is not a usurping.
-      expect(event).toMatchObject({ type: "crowned", actorId: a.id, targetId: null });
+      expect(event).toMatchObject({
+        type: "crowned",
+        actorId: a.id,
+        targetId: null,
+      });
     });
 
     it("closes the old reign and emits `usurped` when #1 changes", async () => {
@@ -209,11 +274,17 @@ describe.skipIf(!hasDb)("rating (database)", () => {
       await recomputeStandings(db, arena.id, season, NOW);
       await recomputeStandings(db, arena.id, season, NOW);
 
-      const history = await db.select().from(reigns).where(eq(reigns.arenaId, arena.id));
+      const history = await db
+        .select()
+        .from(reigns)
+        .where(eq(reigns.arenaId, arena.id));
       expect(history).toHaveLength(1);
 
       // `#5` warns that a board which pings all day gets muted.
-      const feed = await db.select().from(events).where(eq(events.arenaId, arena.id));
+      const feed = await db
+        .select()
+        .from(events)
+        .where(eq(events.arenaId, arena.id));
       expect(feed).toHaveLength(1);
     });
 
@@ -227,7 +298,10 @@ describe.skipIf(!hasDb)("rating (database)", () => {
       await setDay(a.id, addDays(NOW, 1), 300);
       await recomputeStandings(db, arena.id, season, addDays(NOW, 1));
 
-      const [reign] = await db.select().from(reigns).where(eq(reigns.arenaId, arena.id));
+      const [reign] = await db
+        .select()
+        .from(reigns)
+        .where(eq(reigns.arenaId, arena.id));
       expect(reign!.peakPoints).toBeGreaterThanOrEqual(500);
     });
 
@@ -240,7 +314,9 @@ describe.skipIf(!hasDb)("rating (database)", () => {
 
       // An empty arena has no sovereign — a throne has to be won.
       expect(result.usurped).toBeUndefined();
-      expect(await db.select().from(reigns).where(eq(reigns.arenaId, arena.id))).toEqual([]);
+      expect(
+        await db.select().from(reigns).where(eq(reigns.arenaId, arena.id)),
+      ).toEqual([]);
     });
 
     it("serializes concurrent recomputes so only one reign opens — `#6.1`", async () => {
@@ -291,7 +367,12 @@ describe.skipIf(!hasDb)("rating (database)", () => {
       await db
         .update(arenaMembers)
         .set({ status: "left" })
-        .where(and(eq(arenaMembers.arenaId, arena.id), eq(arenaMembers.userId, a.id)));
+        .where(
+          and(
+            eq(arenaMembers.arenaId, arena.id),
+            eq(arenaMembers.userId, a.id),
+          ),
+        );
 
       const result = await recomputeStandings(db, arena.id, season, NOW);
       expect(result.rows.map((r) => r.userId)).not.toContain(a.id);
@@ -299,8 +380,28 @@ describe.skipIf(!hasDb)("rating (database)", () => {
   });
 
   describe("ratingBoard", () => {
+    it("never serializes provider real names", async () => {
+      const a = await newUser();
+      const b = await newUser();
+      await db
+        .update(users)
+        .set({ displayName: "Private Legal Name" })
+        .where(eq(users.id, a.id));
+      const arena = await newArena([a.id, b.id]);
+      const season = await ensureCurrentSeason(db, arena.id, NOW);
+      await setDay(a.id, NOW, 100);
+      await recomputeStandings(db, arena.id, season, NOW);
+      const board = await ratingBoard(db, arena.slug, { now: NOW });
+      expect(board?.rows[0]?.handle).toBe(a.handle);
+      expect(board?.rows[0]?.displayName).toBeNull();
+      expect(JSON.stringify(board)).not.toContain("Private Legal Name");
+    });
     it("applies `#2` visibility: hidden absent, anonymous pseudonymous", async () => {
-      const [named, anon, hidden] = [await newUser(), await newUser(), await newUser()];
+      const [named, anon, hidden] = [
+        await newUser(),
+        await newUser(),
+        await newUser(),
+      ];
       const arena = await newArena([named.id, anon.id, hidden.id]);
       const season = await ensureCurrentSeason(db, arena.id, NOW);
 
@@ -376,10 +477,18 @@ describe.skipIf(!hasDb)("rating (database)", () => {
         })
         .returning();
       createdArenas.push(arena!.id);
-      await db.insert(arenaMembers).values({ arenaId: arena!.id, userId: owner.id });
+      await db
+        .insert(arenaMembers)
+        .values({ arenaId: arena!.id, userId: owner.id });
 
-      const asOwner = await ratingBoard(db, arena!.slug, { now: NOW, viewerId: owner.id });
-      const asStranger = await ratingBoard(db, arena!.slug, { now: NOW, viewerId: stranger.id });
+      const asOwner = await ratingBoard(db, arena!.slug, {
+        now: NOW,
+        viewerId: owner.id,
+      });
+      const asStranger = await ratingBoard(db, arena!.slug, {
+        now: NOW,
+        viewerId: stranger.id,
+      });
       const anonymousViewer = await ratingBoard(db, arena!.slug, { now: NOW });
 
       expect(asOwner!.inviteCode).toBe("OWNERONLY1");
@@ -389,7 +498,9 @@ describe.skipIf(!hasDb)("rating (database)", () => {
     });
 
     it("returns undefined for an unknown arena", async () => {
-      expect(await ratingBoard(db, "no-such-arena", { now: NOW })).toBeUndefined();
+      expect(
+        await ratingBoard(db, "no-such-arena", { now: NOW }),
+      ).toBeUndefined();
     });
   });
 
@@ -434,7 +545,9 @@ describe.skipIf(!hasDb)("rating (database)", () => {
       const season = await ensureCurrentSeason(db, arena.id, NOW);
 
       const days = seasonDays(season, NOW);
-      expect(days.at(-1)!.getTime()).toBeLessThanOrEqual(startOfUtcDay(NOW).getTime());
+      expect(days.at(-1)!.getTime()).toBeLessThanOrEqual(
+        startOfUtcDay(NOW).getTime(),
+      );
     });
   });
 });

@@ -17,6 +17,7 @@
  */
 
 import { cookies } from "next/headers";
+import { cache } from "react";
 import type { NextResponse } from "next/server";
 import { getDb, resolveSession, type User } from "@usurp/db";
 import { isSecureOrigin } from "./env";
@@ -42,7 +43,10 @@ export function setSessionCookie(
   token: string,
   expiresAt: Date,
 ): void {
-  const maxAge = Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+  const maxAge = Math.max(
+    1,
+    Math.floor((expiresAt.getTime() - Date.now()) / 1000),
+  );
   response.cookies.set(SESSION_COOKIE, token, cookieOptions(maxAge));
 }
 
@@ -52,7 +56,11 @@ export function clearSessionCookie(response: NextResponse): void {
 }
 
 export function setOAuthCookie(response: NextResponse, value: string): void {
-  response.cookies.set(OAUTH_COOKIE, value, cookieOptions(OAUTH_COOKIE_MAX_AGE_S));
+  response.cookies.set(
+    OAUTH_COOKIE,
+    value,
+    cookieOptions(OAUTH_COOKIE_MAX_AGE_S),
+  );
 }
 
 export function clearOAuthCookie(response: NextResponse): void {
@@ -77,12 +85,14 @@ export async function oauthCookie(): Promise<string | undefined> {
  * is that revocation is immediate, and a process-level cache would reintroduce
  * exactly the staleness a self-contained token has.
  */
-export async function currentUser(): Promise<User | undefined> {
+// React cache deduplicates within one server render only; it never shares a
+// session across requests. Layout, page and board otherwise repeat this query.
+export const currentUser = cache(async (): Promise<User | undefined> => {
   const token = await sessionToken();
   if (!token) return undefined;
   const resolved = await resolveSession(getDb(), token);
   return resolved?.user;
-}
+});
 
 /** For route handlers that must have a user. Returns the 401 body to send. */
 export async function requireUser(): Promise<

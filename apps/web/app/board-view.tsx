@@ -31,10 +31,10 @@ function name(row: BurnRow): React.ReactNode {
   // An anonymous member is deliberately not a link: `/u/<handle>` 404s for
   // them, and rendering a dead link would suggest a profile exists to find.
   if (row.pseudonym) return <span className="anon">{row.pseudonym}</span>;
-  if (!row.handle) return row.displayName ?? "—";
+  if (!row.handle) return "—";
   return (
     <a className="who-link" href={`/u/${encodeURIComponent(row.handle)}`}>
-      {row.displayName ?? row.handle}
+      {row.handle}
     </a>
   );
 }
@@ -161,12 +161,33 @@ export default async function BoardView({
                     {compact(row.cacheReadTokens)}
                   </td>
                   <td className="num sub">{row.calls.toLocaleString()}</td>
-                  <td className="cost">{usd(row.costMicros)}</td>
+                  <td className="cost">
+                    {usd(row.costMicros)}
+                    {row.usageWarnings && (
+                      <details className="record-warning">
+                        <summary>
+                          {row.pricingWarnings
+                            ? "Pricing warning"
+                            : "Usage warning"}
+                        </summary>
+                        <p>
+                          Some source records have validation warnings
+                          {row.pricingWarnings
+                            ? ", including unknown model pricing or a cost mismatch"
+                            : ""}
+                          . Totals may be incomplete. This is about the usage
+                          records, not the person's name or identity.
+                        </p>
+                      </details>
+                    )}
+                  </td>
                   <td>
-                    <span className={row.flagged ? "badge flagged" : "badge"}>
-                      {row.flagged
-                        ? "flagged"
-                        : row.trustTier.replace("_", " ")}
+                    <span
+                      className={row.underReview ? "badge flagged" : "badge"}
+                    >
+                      {row.underReview
+                        ? "Under review"
+                        : row.trustTier.replaceAll("_", " ")}
                     </span>
                   </td>
                 </tr>

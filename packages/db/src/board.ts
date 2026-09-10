@@ -36,6 +36,10 @@ export interface BurnRow {
   costMicros: number;
   trustTier: "unverified" | "cli_signed" | "org_verified";
   flagged: boolean;
+  /** Record warnings are not an account review or a failed signature. */
+  usageWarnings: boolean;
+  pricingWarnings: boolean;
+  underReview: boolean;
 }
 
 export function windowStart(
@@ -169,7 +173,6 @@ export async function burnBoard(
       userId: arenaMembers.userId,
       visibility: arenaMembers.visibility,
       handle: users.handle,
-      displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       reviewState: users.reviewState,
     })
@@ -227,6 +230,7 @@ export async function burnBoard(
       // A user is flagged if any of their rows in the window carries a gate
       // flag. `#3.4` shows them, flagged, rather than hiding the evidence.
       flagged: sql<boolean>`bool_or(jsonb_array_length(${usageEvents.flags}) > 0)`,
+      pricingWarnings: sql<boolean>`bool_or(${usageEvents.flags} ?| array['unknown_model', 'cost_mismatch'])`,
       signed: sql<boolean>`bool_or(${usageEvents.sigOk})`,
     })
     .from(usageEvents)
@@ -243,7 +247,8 @@ export async function burnBoard(
       return {
         userId: member.userId,
         handle: anonymous ? null : member.handle,
-        displayName: anonymous ? null : member.displayName,
+        // Retained as null for API compatibility. Provider names are private.
+        displayName: null,
         avatarUrl: anonymous ? null : member.avatarUrl,
         pseudonym: anonymous ? pseudonymFor(member.userId) : null,
         effectiveTokens: Number(t?.effective ?? 0),
@@ -259,6 +264,9 @@ export async function burnBoard(
           ? "unverified"
           : "cli_signed") as BurnRow["trustTier"],
         flagged: Boolean(t?.flagged) || member.reviewState === "shadow_frozen",
+        usageWarnings: Boolean(t?.flagged),
+        pricingWarnings: Boolean(t?.pricingWarnings),
+        underReview: member.reviewState === "shadow_frozen",
       };
     })
     .filter((row) => (options.includeFlagged === false ? !row.flagged : true))

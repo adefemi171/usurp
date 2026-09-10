@@ -28,7 +28,7 @@ export default async function UserPage({ params, searchParams }: {
   return <main className={styles.dashboard}>
     <header className={styles.header}>
       <div className={styles.identity}>
-        <div><p className="eyebrow">Your activity, in focus</p><h1>Usage overview<span className={styles.headingDot}>.</span></h1><p>{profile.displayName ?? profile.handle} <span> / @{profile.handle}</span></p></div>
+        <div><p className="eyebrow">Your activity, in focus</p><h1>Usage overview<span className={styles.headingDot}>.</span></h1><p>@{profile.handle}</p></div>
       </div>
       <div className={styles.headerActions}>
         <span className={styles.signed}><i />{profile.trustTier.replaceAll("_", " ")}</span>

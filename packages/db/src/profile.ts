@@ -365,7 +365,7 @@ export async function userProfile(
   );
   return {
     handle: user.handle,
-    displayName: user.displayName,
+    displayName: null,
     avatarUrl: user.avatarUrl,
     joinedAt: user.createdAt,
     window,

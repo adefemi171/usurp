@@ -26,6 +26,7 @@ import {
 import { arenaMembers, arenas, users } from "./schema.js";
 import { joinGlobalArena } from "./seed.js";
 import { derivedSignals, userProfile } from "./profile.js";
+import { burnBoard } from "./board.js";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const NOW = new Date("2026-09-08T13:59:00.000Z");
@@ -266,6 +267,52 @@ describe.skipIf(!hasDb)("userProfile", () => {
   });
 
   describe("aggregation", () => {
+    it("keeps provider real names out of profiles and Burn payloads", async () => {
+      await db
+        .update(users)
+        .set({ displayName: "Private Legal Name" })
+        .where(eq(users.id, userId));
+      await submit([bucket()], 1);
+      const profile = await userProfile(db, handle, {
+        window: "all",
+        now: NOW,
+      });
+      const board = await burnBoard(db, "global", {
+        window: "all",
+        now: NOW,
+        limit: 200,
+      });
+      expect(profile?.displayName).toBeNull();
+      expect(
+        board?.rows.find((r) => r.handle === handle)?.displayName,
+      ).toBeNull();
+      expect(JSON.stringify({ profile, board })).not.toContain(
+        "Private Legal Name",
+      );
+    });
+
+    it("does not confuse pricing warnings with account review or invalid signatures", async () => {
+      await submit([bucket({ model: "unknown-model", cost_micros: 0 })], 1);
+      const row = (
+        await burnBoard(db, "global", { window: "all", now: NOW, limit: 200 })
+      )?.rows.find((r) => r.handle === handle);
+      expect(row).toMatchObject({
+        flagged: true,
+        usageWarnings: true,
+        pricingWarnings: true,
+        underReview: false,
+        trustTier: "cli_signed",
+      });
+      await db
+        .update(users)
+        .set({ reviewState: "shadow_frozen" })
+        .where(eq(users.id, userId));
+      const reviewed = (
+        await burnBoard(db, "global", { window: "all", now: NOW, limit: 200 })
+      )?.rows.find((r) => r.handle === handle);
+      expect(reviewed?.underReview).toBe(true);
+    });
+
     it("provides the real daily model/agent distribution and preserves totals", async () => {
       await submit(
         [

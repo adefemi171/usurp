@@ -34,10 +34,13 @@
  */
 
 /** Title for a rank on the rating board. `undefined` for the unranked mass. */
-export function titleForRank(rank: number, activeMembers: number): BoardTitle | undefined {
-  // A title needs someone to hold it against. In a two-person arena "Sovereign"
-  // is just "the other one", so titles start at three members.
-  if (activeMembers < 3) return undefined;
+export function titleForRank(
+  rank: number,
+  activeMembers: number,
+): BoardTitle | undefined {
+  // Two members are enough for a contest. Match the board's solo-arena gate;
+  // requiring three hid both titles even while a two-member reign could run.
+  if (activeMembers < 2 || rank < 1 || rank > activeMembers) return undefined;
 
   if (rank === 1) return "sovereign";
   if (rank === 2) return "usurper";
@@ -84,7 +87,10 @@ export const EVENT_USURPED = "usurped";
 export const EVENT_CROWNED = "crowned";
 
 /** Feed copy for a usurping, from each side. */
-export function usurpedCopy(actor: string, target: string): {
+export function usurpedCopy(
+  actor: string,
+  target: string,
+): {
   feed: string;
   toActor: string;
   toTarget: string;
@@ -98,7 +104,10 @@ export function usurpedCopy(actor: string, target: string): {
   };
 }
 
-export function crownedCopy(actor: string, arena: string): { feed: string; toActor: string } {
+export function crownedCopy(
+  actor: string,
+  arena: string,
+): { feed: string; toActor: string } {
   return {
     feed: `${actor} is the first Sovereign of ${arena}.`,
     toActor: `You hold the Throne in ${arena}.`,
