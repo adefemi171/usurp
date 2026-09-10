@@ -116,6 +116,26 @@ describe("archive sync batching", () => {
     expect(mocks.updateConfig).not.toHaveBeenCalled();
   });
 
+  it("continues all batches after already-uploaded history without retrying it forever", async () => {
+    mocks.ingest.mockResolvedValueOnce({ ok: true, data: { accepted: 499, rejected: [{ bucketIndex: 0, code: "duplicate_backfill", detail: "Already retained by previous device" }], flags: [] } });
+    const onWarning = vi.fn();
+    expect(await sync({ all: true, quiet: true, onWarning })).toBe(0);
+    expect(mocks.ingest).toHaveBeenCalledTimes(3);
+    expect(config.seq).toBe(7);
+    expect(config.lastSyncAt).toBe("2026-09-08T00:00:00Z");
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  it("still fails genuine rejections mixed with already-uploaded history", async () => {
+    mocks.ingest.mockResolvedValueOnce({ ok: true, data: { accepted: 498, rejected: [
+      { bucketIndex: 0, code: "duplicate_backfill", detail: "Already retained" },
+      { bucketIndex: 1, code: "invalid", detail: "Invalid counter" },
+    ], flags: [] } });
+    expect(await sync({ quiet: true })).toBe(1);
+    expect(mocks.ingest).toHaveBeenCalledTimes(1);
+    expect(config.lastSyncAt).toBe("2026-09-08T00:00:00Z");
+  });
+
   it("re-anchors stale sequence numbers before proceeding to the next batch", async () => {
     mocks.ingest.mockResolvedValueOnce({ ok: false, status: 409, error: "stale_seq", lastSeq: 8 });
     expect(await sync({ all: true, quiet: true })).toBe(0);

@@ -179,7 +179,13 @@ export async function sync(options: SyncOptions): Promise<number> {
 
     // Rejections and flags are always printed, quiet or not: they are the only
     // signal a user gets that their data is being refused or doubted.
-    for (const rejection of rejected) {
+    // Re-enrolled devices legitimately encounter history owned by their old
+    // registration. The server has already retained it: do not retry forever
+    // or prevent later batches (including the bridge snapshot) from arriving.
+    const duplicates = rejected.filter(r => r.code === "duplicate_backfill");
+    const failures = rejected.filter(r => r.code !== "duplicate_backfill");
+    if (duplicates.length && !options.quiet) info(dim(`${duplicates.length} historical buckets already uploaded by another device registration; skipped without duplicating usage.`));
+    for (const rejection of failures) {
       warn(`bucket ${rejection.bucketIndex} rejected (${rejection.code}): ${rejection.detail}`);
     }
     const groupedFlags = new Map<string, { count: number; code: string; detail: string }>();
@@ -189,7 +195,7 @@ export async function sync(options: SyncOptions): Promise<number> {
       group.count++; groupedFlags.set(key, group);
     }
     for (const flag of groupedFlags.values()) warn(`${flag.count} bucket(s) flagged (${flag.code}): ${flag.detail}`);
-    if (rejected.length) { options.onWarning?.(`${rejected.length} usage buckets were rejected. Sync has not advanced.`); return fail(1); }
+    if (failures.length) { options.onWarning?.(`${failures.length} usage buckets were rejected. Sync has not advanced.`); return fail(1); }
     if (flags.length) options.onWarning?.(`${flags.length} validation or pricing flags. Review data quality on your dashboard.`);
 
     if (!options.quiet && accepted > 0) {
