@@ -10,17 +10,12 @@
  * the board "the hottest read path".
  */
 
-import {
-  formatDuration,
-  getDb,
-  ratingBoard,
-  TITLES,
-  type BoardTitle,
-} from "@usurp/db";
+import { formatDuration, getDb, ratingBoard } from "@usurp/db";
 import InvitePrompt from "./invite-prompt";
 import Avatar from "./avatar";
 import { currentUser } from "../lib/session";
 import type { TrustFilter } from "./board-nav";
+import TitleBadge, { TitleIcon } from "./title-badge";
 
 function usd(points: number): string {
   return points.toLocaleString();
@@ -34,16 +29,6 @@ function movement(value: number | null): React.ReactNode {
   return (
     <span className={up ? "move up" : "move down"}>
       {up ? "▲" : "▼"} {Math.abs(value)}
-    </span>
-  );
-}
-
-function TitleBadge({ title }: { title: BoardTitle | undefined }) {
-  if (!title) return null;
-  const copy = TITLES[title];
-  return (
-    <span className={`title-badge ${title}`} title={copy.blurb}>
-      {copy.label}
     </span>
   );
 }
@@ -111,7 +96,7 @@ export default async function RatingView({
                 board showing only who is first cannot say whether they are
                 entrenched or just arrived. */}
             <span className="throne-state">
-              <span className="glyph crowned">♛</span>{" "}
+              <TitleIcon title="sovereign" />{" "}
               {board.throne.display ?? "Someone"} has held the Throne{" "}
               <strong>{formatDuration(board.throne.heldSeconds)}</strong>
             </span>
@@ -144,7 +129,15 @@ export default async function RatingView({
           aria-label="Rating standings"
           tabIndex={0}
         >
-          <table className="board">
+          <table className="board rating-board">
+            <colgroup>
+              <col className="rating-rank-col" />
+              <col className="rating-title-col" />
+              <col className="rating-who-col" />
+              <col className="rating-points-col" />
+              <col className="rating-moved-col" />
+              <col className="rating-trust-col" />
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col">#</th>
@@ -171,35 +164,37 @@ export default async function RatingView({
                   }
                 >
                   <td className="rank">{row.rank}</td>
-                  <td>
-                    {row.eliminated && (
-                      <span
-                        className="badge out"
-                        title="Eliminated from title contention this season. Still accruing."
-                      >
-                        out
-                      </span>
-                    )}
-                    <TitleBadge title={row.title} />
-                    {!row.title && !row.eliminated && (
-                      <span className="sub">
-                        {row.underReview
-                          ? "Under review"
-                          : row.trustTier === "unverified"
-                            ? "Not eligible"
-                            : row.points === 0
-                              ? "Awaiting points"
-                              : "Challenger"}
-                      </span>
-                    )}
-                    {row.title === "sovereign" && board.throne && (
-                      <span
-                        className="held"
-                        title={`Since ${board.throne.startedAt.toISOString()}`}
-                      >
-                        held {formatDuration(board.throne.heldSeconds)}
-                      </span>
-                    )}
+                  <td className="rating-title-cell">
+                    <div className="rating-title-stack">
+                      {row.eliminated && (
+                        <span
+                          className="badge out"
+                          title="Eliminated from title contention this season. Still accruing."
+                        >
+                          out
+                        </span>
+                      )}
+                      <TitleBadge title={row.title} />
+                      {!row.title && !row.eliminated && (
+                        <span className="sub">
+                          {row.underReview
+                            ? "Under review"
+                            : row.trustTier === "unverified"
+                              ? "Not eligible"
+                              : row.points === 0
+                                ? "Awaiting points"
+                                : "Challenger"}
+                        </span>
+                      )}
+                      {row.title === "sovereign" && board.throne && (
+                        <span
+                          className="held"
+                          title={`Since ${board.throne.startedAt.toISOString()}`}
+                        >
+                          held {formatDuration(board.throne.heldSeconds)}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="who">
                     <span className="who-cell">
