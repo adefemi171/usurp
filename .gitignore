@@ -17,7 +17,7 @@ apps/web/public/downloads/*.sha256
 .migration-private/
 
 # Private deployment operations and internal planning (keep local copies).
-/deploy/database/
+/deploy/
 /docs/
 /SPEC.md
 /spec.md
@@ -43,6 +43,8 @@ apps/web/public/downloads/*.sha256
 .claude/
 .codex/
 .agents/
+AGENTS.md
+CLAUDE.md
 /backups/
 *.dump
 *.dump.gpg

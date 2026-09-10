@@ -27,7 +27,7 @@ SPEC.md
 desktop
 
 # Private operations and planning must not enter public application images.
-deploy/database
+deploy
 docs
 ROADMAP.md
 spec.md
@@ -36,8 +36,24 @@ scripts/mac-backup.test.ts
 .claude
 .codex
 .agents
+**/AGENTS.md
+**/CLAUDE.md
 backups
 *.dump
 *.dump.gpg
 *.sql.gz
 *.sql.gpg
+
+# Only application/setup/test scripts belong in the build context.
+scripts/*
+!scripts/web.mjs
+!scripts/render-demo.mjs
+!scripts/render-demo.test.ts
+!scripts/maintenance.mjs
+!scripts/maintenance.test.ts
+!scripts/database-endpoint-probe.mjs
+!scripts/database-endpoint-probe.test.ts
+!scripts/init-env.mjs
+!scripts/init-env.test.ts
+!scripts/http-smoke.mjs
+!scripts/compose-smoke.mjs

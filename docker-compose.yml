@@ -1,12 +1,10 @@
-# Usurp — single-file self-host, per `SPEC.md#8`.
+# Usurp — self-hosted application stack.
 #
 #   docker compose up -d          # postgres, migrations, then the board on :3000
 #   docker compose run --rm enroll --handle kenn
 #   docker compose logs -f web
 #
-# `burnlog set this expectation; org buyers will ask` — so this file is the
-# supported deployment, not a dev convenience. The dev loop (`npm run web`)
-# uses the same DATABASE_URL against the same `postgres` service.
+# The development server can use the same PostgreSQL service.
 
 name: usurp
 
@@ -110,7 +108,7 @@ services:
       retries: 3
       start_period: 15s
 
-  # `#8`'s job runner: season rollover, decay, the rating recompute.
+  # Background jobs: season rollover, decay, and rating recomputation.
   # A separate process from `web` on purpose — a recompute is periodic and
   # heavy, and behind a load balancer every web replica would run its own copy.
   worker:
