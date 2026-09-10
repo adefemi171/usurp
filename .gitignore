@@ -23,7 +23,21 @@ apps/web/public/downloads/*.sha256
 /spec.md
 /ROADMAP.md
 /roadmap.md
-/scripts/mac-backup.test.ts
+
+# Scripts are private by default. Keep only the public startup, setup, and
+# verification entry points, including Render's transitive dependencies.
+/scripts/*
+!/scripts/web.mjs
+!/scripts/render-demo.mjs
+!/scripts/render-demo.test.ts
+!/scripts/maintenance.mjs
+!/scripts/maintenance.test.ts
+!/scripts/database-endpoint-probe.mjs
+!/scripts/database-endpoint-probe.test.ts
+!/scripts/init-env.mjs
+!/scripts/init-env.test.ts
+!/scripts/http-smoke.mjs
+!/scripts/compose-smoke.mjs
 
 # Local assistant state, database exports, and backup artifacts.
 .claude/
