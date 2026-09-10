@@ -137,6 +137,20 @@ export async function ingest(
       };
     }
 
+    if (device.installationId && !payload.installation_id) return fail("stale_reader", "Update Connect: this device now requires installation-aware syncing.");
+    if (device.installationId && payload.installation_id && device.installationId !== payload.installation_id) {
+      return fail("invalid_repair", "This device is bound to another installation. Enroll this computer separately.");
+    }
+    if (payload.bridge?.sourceId?.startsWith("agentsview:installation:") &&
+        !payload.bridge.sourceId.startsWith(`agentsview:installation:${payload.installation_id}:`)) {
+      return fail("invalid_repair", "Bridge source must match the signed installation identity.");
+    }
+    if (payload.installation_id && !device.installationId) {
+      await tx.update(devices).set({ installationId: payload.installation_id }).where(eq(devices.id, device.id));
+    }
+    if (payload.installation_id) await tx.execute(sql`SELECT pg_advisory_xact_lock(${deviceLockKey(`installation:${device.userId}:${payload.installation_id}`)})`);
+    if (payload.bridge) await tx.execute(sql`SELECT pg_advisory_xact_lock(${deviceLockKey(`bridge:${device.userId}`)})`);
+
     if ((payload.reader_revision ?? 1) < device.usageRevision) {
       return fail("stale_reader", "Update your CLI: this device has repaired usage accounting and cannot accept older readers.");
     }
@@ -152,6 +166,23 @@ export async function ingest(
     const rejectedIndexes = new Set(
       gated.rejects.filter((v) => v.bucketIndex >= 0).map((v) => v.bucketIndex),
     );
+
+    if (!gated.rejects.some(v => v.bucketIndex < 0) && payload.bridge?.sourceId?.startsWith("agentsview:installation:")) {
+      const [previous] = await tx.select().from(usageBridgeSnapshots).where(eq(usageBridgeSnapshots.deviceId, device.id));
+      // Preserve the previously deduplicated legacy group during an upgrade.
+      // A fresh laptop has no previous snapshot and cannot adopt another group.
+      if (previous && !previous.snapshot.sourceId?.startsWith("agentsview:installation:")) {
+        const source = previous.snapshot.sourceId;
+        const owned = await tx.select({ id: usageBridgeSnapshots.deviceId, snapshot: usageBridgeSnapshots.snapshot, revokedAt: devices.revokedAt, installationId: devices.installationId })
+          .from(usageBridgeSnapshots).innerJoin(devices, eq(devices.id, usageBridgeSnapshots.deviceId)).where(eq(devices.userId, device.userId));
+        for (const old of owned) if (!old.snapshot.sourceId || old.snapshot.sourceId === source) {
+          await tx.update(usageBridgeSnapshots).set({ snapshot: { ...old.snapshot, sourceId: payload.bridge.sourceId } }).where(eq(usageBridgeSnapshots.deviceId, old.id));
+          // Retired registrations in that same legacy group retain their native
+          // deduplication boundary too. Active laptops acquire their own ID.
+          if (old.revokedAt && !old.installationId) await tx.update(devices).set({ installationId: payload.installation_id }).where(eq(devices.id, old.id));
+        }
+      }
+    }
 
     /**
      * ── Duplicate backfill guard ────────────────────────────────────────────
@@ -193,7 +224,11 @@ export async function ingest(
       // per hour. Match the same (hour, agent, model) scope as the old lookup.
       const clashes = await tx.select({ deviceId: usageEvents.deviceId,
         hour: usageEvents.hour, agent: usageEvents.agent, model: usageEvents.model })
-        .from(usageEvents).where(and(eq(usageEvents.userId, device.userId),
+        .from(usageEvents).innerJoin(devices, eq(usageEvents.deviceId, devices.id)).where(and(eq(usageEvents.userId, device.userId),
+          // Known distinct installations can have genuine overlapping history.
+          // Old clients retain their legacy guard; identified clients must not
+          // discard another laptop's history on the basis of an unknown identity.
+          ...((payload.installation_id ?? device.installationId) ? [eq(devices.installationId, (payload.installation_id ?? device.installationId)!)] : []),
           ne(usageEvents.deviceId, device.id), or(...suspectIndexes.map(({ bucket }) =>
             and(eq(usageEvents.hour, new Date(bucket.hour)), eq(usageEvents.agent, bucket.agent), eq(usageEvents.model, bucket.model))))));
       const clashKey = (hour: Date, agent: string, model: string) => JSON.stringify([hour.toISOString(), agent, model]);

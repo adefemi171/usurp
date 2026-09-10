@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn(), updateConfig: vi.fn(), loadKey: vi.fn(), collect: vi.fn(), ingest: vi.fn(), bridge: vi.fn(),
 }));
 vi.mock("@usurp/protocol", async original => ({ ...await original<typeof import("@usurp/protocol")>(), fetchBridgeSnapshot: mocks.bridge }));
-vi.mock("../config.js", () => ({ loadConfig: mocks.loadConfig, updateConfig: mocks.updateConfig }));
+vi.mock("../config.js", () => ({ loadConfig: mocks.loadConfig, updateConfig: mocks.updateConfig, installationId: async () => "12345678-1234-4123-8123-123456789abc" }));
 vi.mock("../keystore.js", () => ({ loadKey: mocks.loadKey, KeystoreError: class extends Error {} }));
 vi.mock("../api.js", () => ({ ApiClient: class { ingest = mocks.ingest; } }));
 vi.mock("../collect.js", async (original) => ({

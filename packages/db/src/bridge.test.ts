@@ -18,6 +18,15 @@ function native(agent = "codex", deviceId = "a"): UsageSeriesPoint & { deviceId:
   calls: 1, sessionsStarted: 1, sessionsCompleted: 0, sessionsAbandoned: 0, editsApplied: 0, editsReverted: 0, commits: 0, historicalBuckets: 0, unpricedBuckets: 0,
 }; }
 describe("preferred-source analytics", () => {
+  it("combines different installations on port 8080 but replaces a re-enrolled copy", () => {
+    const sourceA = "agentsview:installation:12345678-1234-4123-8123-123456789abc:8080";
+    const sourceB = "agentsview:installation:22345678-1234-4123-8123-123456789abc:8080";
+    const a = { deviceId: "a", snapshot: { ...snapshot(100), sourceId: sourceA } };
+    const b = { deviceId: "b", snapshot: { ...snapshot(200), sourceId: sourceB } };
+    const fresh = { deviceId: "a-new", snapshot: { ...snapshot(50), sourceId: sourceA, fetchedAt: "2026-09-10T12:00:00Z" } };
+    expect(mergeBridgeSeries([], [a, b, fresh])[0]?.costMicros).toBe(250);
+    expect(selectedBridgeSnapshots([a, b, fresh])).toHaveLength(2);
+  });
   it("reconciles legacy CLI and identified Connect snapshots without double counting", () => {
     const legacy = { deviceId: "a", snapshot: { ...snapshot(1198523968), fetchedAt: "2026-09-09T22:13:51.532Z" }, importedAt: "old" };
     const current = { deviceId: "b", snapshot: { ...snapshot(1170633148), sourceId: "agentsview:local:8080", fetchedAt: "2026-09-10T12:00:00.000Z" }, importedAt: "new" };
@@ -65,6 +74,26 @@ describe("preferred-source analytics", () => {
 
 describe.skipIf(!process.env.DATABASE_URL)("bridge persistence", () => {
   afterAll(closeDb);
+  it("upgrades a legacy group once, then keeps a second laptop separate on the same port", async () => {
+    const db = getDb(); const keys = generateDeviceKeyPair(); const other = generateDeviceKeyPair();
+    const [user] = await db.insert(users).values({ handle: `upgrade_${Date.now()}` }).returning();
+    const installationA = "12345678-1234-4123-8123-123456789abc", installationB = "22345678-1234-4123-8123-123456789abc";
+    const id = `upgrade_${Date.now()}`, idB = `${id}_b`, oldId = `${id}_old`;
+    try {
+      await db.insert(devices).values([{ id, userId: user!.id, publicKey: keys.publicKey }, { id: idB, userId: user!.id, publicKey: other.publicKey }, { id: oldId, userId: user!.id, publicKey: generateDeviceKeyPair().publicKey, revokedAt: now }]);
+      await db.insert(usageBridgeSnapshots).values([{ deviceId: id, snapshot: { ...snapshot(100), sourceId: "agentsview:local:8080" } }, { deviceId: oldId, snapshot: { ...snapshot(100), fetchedAt: "2026-09-09T11:00:00Z" } }]);
+      for (const [deviceId, installation, key, cost] of [[id, installationA, keys, 50], [idB, installationB, other, 200]] as const) {
+        const payload = signPayload({ v: 1, device_id: deviceId, installation_id: installation, seq: 1, submitted_at: now.toISOString(), buckets: [], bridge: { ...snapshot(cost), sourceId: `agentsview:installation:${installation}:8080` } }, key.privateKeyPem);
+        expect((await ingest(db, payload, { now })).ok).toBe(true);
+      }
+      const stored = await db.select().from(usageBridgeSnapshots).where(eq(usageBridgeSnapshots.deviceId, oldId));
+      expect(stored[0]?.snapshot.sourceId).toBe(`agentsview:installation:${installationA}:8080`);
+      const [retired] = await db.select().from(devices).where(eq(devices.id, oldId));
+      expect(retired?.installationId).toBe(installationA);
+      const all = await db.select({ deviceId: usageBridgeSnapshots.deviceId, snapshot: usageBridgeSnapshots.snapshot }).from(usageBridgeSnapshots).innerJoin(devices, eq(usageBridgeSnapshots.deviceId, devices.id)).where(eq(devices.userId, user!.id));
+      expect(mergeBridgeSeries([], all)[0]?.costMicros).toBe(250);
+    } finally { await db.delete(users).where(eq(users.id, user!.id)); }
+  });
   it("supports signed imports, downward corrections, replay protection, ownership and native isolation", async () => {
     const db = getDb(); const keys = generateDeviceKeyPair();
     const [user] = await db.insert(users).values({ handle: `bridge_${Date.now()}` }).returning();

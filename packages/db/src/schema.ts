@@ -145,6 +145,8 @@ export const devices = pgTable(
     /** Client-visible id, carried in every payload's `device_id`. */
     id: text("id").primaryKey(),
     usageRevision: integer("usage_revision").notNull().default(1),
+    /** Random local installation identity; never a hardware identifier. */
+    installationId: uuid("installation_id"),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -176,6 +178,19 @@ export const devices = pgTable(
     index("devices_user_idx").on(t.userId),
   ],
 );
+
+/** Short-lived passwordless challenges. Neither codes nor browser tokens are stored. */
+export const emailChallenges = pgTable("email_challenges", {
+  idHash: text("id_hash").primaryKey(),
+  email: text("email").notNull(),
+  codeHash: text("code_hash").notNull(),
+  linkUserId: uuid("link_user_id").references(() => users.id, { onDelete: "cascade" }),
+  returnTo: text("return_to").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, t => [index("email_challenges_email_created_idx").on(t.email, t.createdAt)]);
 
 /**
  * One-time device enrollment codes.

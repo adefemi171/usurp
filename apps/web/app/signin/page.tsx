@@ -1,11 +1,11 @@
-import { availableProviders, devAuthEnabled } from "../../lib/env";
+import { availableProviders, devAuthEnabled, emailAuthEnabled } from "../../lib/env";
+import { EmailForm } from "./email-form";
 import { currentUser } from "../../lib/session";
 import { redirect } from "next/navigation";
 import { safeReturnTo } from "../../lib/return-to";
 
 const LABELS: Record<string, string> = {
   github: "Sign in with GitHub",
-  google: "Sign in with Google",
   dev: "Developer sign-in (local only)",
 };
 
@@ -29,7 +29,7 @@ export default async function SignInPage({
   if (await currentUser()) redirect(typeof params.return_to === "string" ? safeReturnTo(params.return_to) : "/settings");
   const error = typeof params.error === "string" ? params.error : undefined;
   const returnTo = typeof params.return_to === "string" ? params.return_to : undefined;
-  const providers = availableProviders();
+  const providers: string[] = availableProviders();
 
   const query = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "";
 
@@ -66,11 +66,12 @@ export default async function SignInPage({
         </div>
         {providers.length === 0 && (
           <p className="field-hint">
-            No sign-in provider is enabled on this deployment. Ask its administrator to configure Google or GitHub sign-in.
+            GitHub sign-in is not configured on this deployment.
           </p>
         )}
         <p className="auth-note">Signing in never joins a public board automatically. You decide what to share in Settings.</p>
-        <details className="auth-options"><summary>Looking for another sign-in option?</summary><p>Only configured providers appear here. Apple and email sign-in are not available in this version.</p></details>
+        {emailAuthEnabled() ? <div className="auth-options"><p>Or use your email address</p><EmailForm returnTo={returnTo} /></div> : <p className="field-hint">Email sign-in will be available once this deployment’s email sender is configured.</p>}
+        <p className="field-hint">Already use GitHub? Continue with GitHub, then link your email in Settings to keep one account.</p>
       </section>
 
       {devAuthEnabled() && (

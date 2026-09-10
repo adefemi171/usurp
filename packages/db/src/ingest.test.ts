@@ -408,6 +408,22 @@ describe.skipIf(!hasDb)("ingest", () => {
   });
 
   describe("duplicate backfill guard", () => {
+    it("counts overlapping history from separate installations but not a re-enrollment", async () => {
+      const installationA = "12345678-1234-4123-8123-123456789abc";
+      const installationB = "22345678-1234-4123-8123-123456789abc";
+      expect((await submit(envelope([bucket()], { installation_id: installationA }))).accepted).toBe(1);
+      for (const [installation, accepted] of [[installationB, 1], [installationA, 0]] as const) {
+        const next = await secondDeviceFor(userId, new Date("2026-09-08T20:00:00Z"));
+        const result = await ingest(db, signPayload({ v: 1, device_id: next.deviceId, seq: 1, submitted_at: NOW.toISOString(), installation_id: installation,
+          buckets: [{ ...bucket(), dedupe_key: dedupeKey(next.deviceId, HOUR, "claude-code", "claude-opus-5") }] }, next.keys.privateKeyPem), { now: NOW });
+        expect(result.accepted).toBe(accepted);
+      }
+      expect(await db.select().from(usageEvents).where(eq(usageEvents.userId, userId))).toHaveLength(2);
+      expect((await submit(envelope([bucket()], { seq: 2, installation_id: installationB }))).failure).toBe("invalid_repair");
+      const tampered = signPayload(envelope([bucket()], { seq: 2, installation_id: installationA }), keys.privateKeyPem);
+      tampered.installation_id = installationB;
+      expect((await ingest(db, tampered, { now: NOW })).failure).toBe("bad_signature");
+    });
     /**
      * The bug this exists for: `dedupe_key` is per-device, so re-enrolling one
      * machine mints a new identity whose `sync --all` re-reads the same

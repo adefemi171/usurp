@@ -72,10 +72,13 @@ export function googleCredentials(): OAuthCredentials | undefined {
 }
 
 /** Providers actually usable right now, for rendering the sign-in page. */
-export function availableProviders(): Array<"github" | "google" | "dev"> {
-  const out: Array<"github" | "google" | "dev"> = [];
+export function availableProviders(): Array<"github" | "dev"> {
+  const out: Array<"github" | "dev"> = [];
   if (githubCredentials()) out.push("github");
-  if (googleCredentials()) out.push("google");
   if (devAuthEnabled()) out.push("dev");
   return out;
+}
+
+export function emailAuthEnabled(): boolean {
+  return Boolean(process.env.RESEND_API_KEY && process.env.AUTH_EMAIL_FROM);
 }

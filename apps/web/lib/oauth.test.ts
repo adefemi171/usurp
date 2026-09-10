@@ -33,20 +33,10 @@ describe("configured OAuth providers", () => {
     expect(url.searchParams.get("state")).toBeTruthy();
   });
 
-  it("creates a Google account redirect with PKCE", async () => {
-    const { getProvider, startFlow } = await configuredOAuth();
-    const provider = getProvider("google");
-    expect(provider).toBeDefined();
-
-    const started = startFlow(provider!, "/settings");
-    const url = new URL(started.authorizeUrl);
-    expect(url.origin + url.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
-    expect(url.searchParams.get("client_id")).toBe("google-client");
-    expect(url.searchParams.get("redirect_uri")).toBe(
-      "http://localhost:3000/auth/google/callback",
-    );
-    expect(url.searchParams.get("scope")).toContain("email");
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("code_challenge")).toBeTruthy();
+  it("disables Google even when old credentials remain configured", async () => {
+    const { getProvider } = await configuredOAuth();
+    expect(getProvider("google")).toBeUndefined();
+    const { availableProviders } = await import("./env.js");
+    expect(availableProviders()).not.toContain("google");
   });
 });

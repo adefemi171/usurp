@@ -8,7 +8,7 @@
  */
 
 import { signPayload, PAYLOAD_VERSION, isKnownModel, fetchBridgeSnapshot, type BridgeSnapshot, type Envelope } from "@usurp/protocol";
-import { loadConfig } from "../config.js";
+import { loadConfig, installationId } from "../config.js";
 import { batchBuckets, collect, resolveSince, summarize } from "../collect.js";
 import { loadKey } from "../keystore.js";
 import { bold, compactNumber, dim, info, reserveStdoutForData, usd, warn } from "../ui.js";
@@ -32,10 +32,11 @@ export async function preview(options: PreviewOptions): Promise<number> {
   // before deciding to enrol at all.
   const deviceId = config.deviceId ?? "dev_preview";
   const now = new Date();
+  const installation = await installationId();
   let bridge: BridgeSnapshot | undefined;
   const bridgeUrl = options.noBridge ? undefined : options.agentsview ?? process.env.USURP_AGENTS_VIEW_URL ?? config.agentsviewUrl;
   if (bridgeUrl) {
-    try { bridge = await fetchBridgeSnapshot(bridgeUrl); }
+    try { bridge = await fetchBridgeSnapshot(bridgeUrl); if (bridge.sourceId) bridge = { ...bridge, sourceId: bridge.sourceId.replace("agentsview:local:", `agentsview:installation:${installation}:`) }; }
     catch { warn("AgentsView preview unavailable. No snapshot would be uploaded; the server would retain its previous snapshot."); }
   }
   if (options.bridgeOnly && !bridge) return 1;
@@ -63,6 +64,7 @@ export async function preview(options: PreviewOptions): Promise<number> {
       seq: config.seq,
       submitted_at: now.toISOString(),
       reader_revision: 2,
+      installation_id: installation,
       buckets,
     };
 

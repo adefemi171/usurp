@@ -265,3 +265,4 @@ export {
   type RespondResult,
   type SettledDuel,
 } from "./duels.js";
+export * from "./email-auth.js";

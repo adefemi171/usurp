@@ -9,7 +9,7 @@
 
 import { signPayload, PAYLOAD_VERSION, fetchBridgeSnapshot, type BridgeSnapshot, type Envelope } from "@usurp/protocol";
 import { ApiClient } from "../api.js";
-import { loadConfig, updateConfig } from "../config.js";
+import { loadConfig, updateConfig, installationId } from "../config.js";
 import { batchBuckets, collect, resolveSince, summarize } from "../collect.js";
 import { KeystoreError, loadKey } from "../keystore.js";
 import { bold, compactNumber, cyan, dim, error, info, success, usd, warn } from "../ui.js";
@@ -56,10 +56,11 @@ export async function sync(options: SyncOptions): Promise<number> {
   }
 
   const now = new Date();
+  const installation = await installationId();
   let bridge: BridgeSnapshot | undefined;
   const bridgeUrl = options.noBridge ? undefined : options.agentsview ?? process.env.USURP_AGENTS_VIEW_URL ?? config.agentsviewUrl;
   if (bridgeUrl) {
-    try { bridge = await fetchBridgeSnapshot(bridgeUrl); }
+    try { bridge = await fetchBridgeSnapshot(bridgeUrl); if (bridge.sourceId) bridge = { ...bridge, sourceId: bridge.sourceId.replace("agentsview:local:", `agentsview:installation:${installation}:`) }; }
     catch { warn("AgentsView import unavailable or inconsistent. Keeping the previous snapshot; native sync continues."); }
   }
   if (options.bridgeOnly && !bridge) { error("No bridge snapshot available", "Pass --agentsview http://localhost:8080 and ensure AgentsView is running."); return fail(1); }
@@ -108,6 +109,7 @@ export async function sync(options: SyncOptions): Promise<number> {
         submitted_at: now.toISOString(),
         buckets: batch,
         reader_revision: 2,
+        installation_id: installation,
         ...(bridge && batchIndex === batches.length - 1 ? { bridge } : {}),
         ...(options.repair ? { replace_agents: repairAgents } : {}),
       };

@@ -2,16 +2,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ pathname: "/", user: undefined as { handle: string } | undefined, providers: ["github"] as string[] }));
+const state = vi.hoisted(() => ({ pathname: "/", user: undefined as { handle: string } | undefined, providers: ["github"] as string[], email: false }));
 vi.mock("next/navigation", () => ({ usePathname: () => state.pathname, redirect: (url: string) => { throw new Error(`redirect:${url}`); } }));
 vi.mock("../lib/session", () => ({ currentUser: async () => state.user }));
-vi.mock("../lib/env", () => ({ availableProviders: () => state.providers, devAuthEnabled: () => false }));
+vi.mock("../lib/env", () => ({ availableProviders: () => state.providers, devAuthEnabled: () => false, emailAuthEnabled: () => state.email }));
 import AppNav from "./app-nav";
 import SignInPage from "./signin/page";
 import NotFound from "./not-found";
 import BoardNav from "./board-nav";
 
-beforeEach(() => { state.pathname = "/"; state.user = undefined; state.providers = ["github"]; });
+beforeEach(() => { state.pathname = "/"; state.user = undefined; state.providers = ["github"]; state.email = false; });
 
 describe("application navigation", () => {
   it("gives visitors a working sign-in link without an invented usage profile", () => {
@@ -43,10 +43,10 @@ describe("application navigation", () => {
 
 describe("sign-in experience", () => {
   it("renders configured OAuth links and preserves the return destination", async () => {
-    state.providers = ["github", "google"];
+    state.providers = ["github"];
     const html = renderToStaticMarkup(await SignInPage({ searchParams: Promise.resolve({ return_to: "/settings#devices" }) }));
     expect(html).toContain('href="/auth/github?return_to=%2Fsettings%23devices"');
-    expect(html).toContain('href="/auth/google?return_to=%2Fsettings%23devices"');
+    expect(html).not.toContain('href="/auth/google');
     expect(html).not.toContain('<input');
     expect(html).not.toContain('href="/auth/apple');
     expect(html).toContain("never joins a public board automatically");
@@ -54,13 +54,19 @@ describe("sign-in experience", () => {
   it("explains missing configuration instead of displaying a dead sign-in form", async () => {
     state.providers = [];
     const html = renderToStaticMarkup(await SignInPage({ searchParams: Promise.resolve({}) }));
-    expect(html).toContain("No sign-in provider is enabled");
+    expect(html).toContain("GitHub sign-in is not configured");
     expect(html).not.toContain('href="/auth/');
   });
   it("announces known errors without reflecting arbitrary query text", async () => {
     const html = renderToStaticMarkup(await SignInPage({ searchParams: Promise.resolve({ error: "injected-message" }) }));
     expect(html).toContain('role="alert"');
     expect(html).not.toContain("injected-message");
+  });
+  it("offers passwordless email registration when delivery is configured", async () => {
+    state.email = true;
+    const html = renderToStaticMarkup(await SignInPage({ searchParams: Promise.resolve({}) }));
+    expect(html).toContain('type="email"'); expect(html).toContain("Continue with email");
+    expect(html).not.toContain('type="password"'); expect(html).not.toContain("Sign in with Google");
   });
   it("redirects an existing session to settings", async () => {
     state.user = { handle: "member" };

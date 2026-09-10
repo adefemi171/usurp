@@ -34,7 +34,7 @@ export const bridgeSnapshotSchema = z.object({
   source: z.literal("agentsview"), schemaVersion: z.literal(6),
   fetchedAt: z.string().datetime(), timezone: z.literal("UTC"),
   /** Stable, non-sensitive identity of the configured local summary service. */
-  sourceId: z.string().regex(/^agentsview:local:\d+$/).optional(),
+  sourceId: z.string().regex(/^agentsview:(?:local|installation:[a-f0-9-]{36}):\d+$/).optional(),
   pricingVersion: z.string().max(256), costBasis: z.literal("source-calculated"),
   agents: z.array(z.string().min(1).max(64)).min(1).max(64),
   rows: z.array(bridgeRowSchema).min(1).max(10000),

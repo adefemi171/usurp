@@ -19,6 +19,8 @@ import {
   GLOBAL_ARENA_SLUG,
 } from "@usurp/db";
 import { currentUser } from "../../lib/session";
+import { emailAuthEnabled } from "../../lib/env";
+import { EmailForm } from "../signin/email-form";
 import EnrollButton from "./enroll-button";
 import {
   type NoticeCode,
@@ -500,6 +502,8 @@ export default async function SettingsPage({
 
       <section className="settings-section" id="security">
       <h2 className="section">Account security</h2>
+      {params.email === "linked" && <p role="status">Email linked. You can now use that email to sign in to this same account.</p>}
+      {emailAuthEnabled() && <details><summary>Link an email sign-in to this account</summary><p>Verify your email to use it as another way to sign in. Existing accounts are never merged automatically.</p><EmailForm linking /></details>}
       <footer className="account-security">
         <p>
           Sign out everywhere if you no longer trust a session. Revoking a device above stops new submissions but preserves your usage history.

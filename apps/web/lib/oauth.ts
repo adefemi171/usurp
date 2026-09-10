@@ -195,7 +195,7 @@ const PROVIDERS: Record<ProviderId, Provider> = { github, google, dev };
 /** Look up a usable provider. Returns undefined if unconfigured or disabled. */
 export function getProvider(id: string): Provider | undefined {
   if (id === "dev") return devAuthEnabled() ? dev : undefined;
-  if (id !== "github" && id !== "google") return undefined;
+  if (id !== "github") return undefined;
   const provider = PROVIDERS[id];
   return provider.credentials() ? provider : undefined;
 }

@@ -10,7 +10,8 @@ rating board, the Throne and its feed, shrinking circles, duels, notifications,
 share cards,
 the per-user drill-down, OAuth sign-in, handles, per-arena visibility, clubs via
 invite code, and self-service device enrollment. Hosted GitHub sign-in has been
-verified; Google requires deployment-specific credentials and its own live check.
+verified. Passwordless email registration uses one-time codes; configure a Resend
+sender and verify delivery before enabling it. Google sign-in is disabled.
 
 **Usurp Connect now has a browser-based local service.** Install the standalone
 package offered by your deployment's `/connect` page, approve device pairing,
@@ -18,6 +19,28 @@ choose sources, and let it sync in the background. Node.js 22.13+ is required;
 repository cloning, Docker, and a signed desktop app are not. See the
 [service guide](connect/README.md). The Electron app remains a separate unsigned
 preview; [its guide](docs/usurp-connect.md) covers desktop testing and signing.
+
+### GitHub and email access
+
+Public boards need no account. Register or sign in with GitHub, or use an emailed
+8-digit code when email delivery is configured. Existing GitHub users should link
+their email in **Settings → Account security** before using email sign-in; accounts
+are never automatically merged just because their email addresses match.
+
+For email delivery, verify a sending domain in Resend and set `RESEND_API_KEY` and
+`AUTH_EMAIL_FROM` in the deployment's secret environment settings. Never commit
+these credentials. Codes expire after ten minutes, permit five verification
+attempts, and are bound to the requesting browser. Without sender configuration,
+the email form stays disabled instead of pretending to send mail.
+
+Connect each laptop once to the same account. Updated clients share a random
+installation ID between CLI and Connect on that computer, stored in
+`~/.usurp/installation-id`; this is not a hardware fingerprint. Keep it when
+re-enrolling the same computer, but do not copy it to a different laptop. Upgrade
+and sync all existing laptops: legacy port-only snapshots cannot reliably identify
+separate machines until each laptop has uploaded its installation-aware snapshot.
+Run one automatic collector per computer. GitHub sign-in and device pairing do
+not themselves upload usage; sources still require your approval.
 
 **M2's ship gate has passed.** `SPEC.md#4.4` requires proving in simulation that
 consistency × efficiency beats volume, with `#1` saying kill the project if it
@@ -202,7 +225,7 @@ gate working, not a misconfiguration.
 ```bash
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
-# or GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+# Optional email codes: RESEND_API_KEY and AUTH_EMAIL_FROM
 AUTH_SECRET=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")
 USURP_BASE_URL=https://usurp.example.com
 ```

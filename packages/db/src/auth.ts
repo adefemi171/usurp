@@ -1,8 +1,8 @@
 /**
  * Sessions, identities, and handles — `SPEC.md#9` M1.
  *
- * `#8` picks GitHub + Google OAuth: GitHub is the norm for this audience and
- * gives a free identity and avatar. This module is provider-agnostic — it takes
+ * GitHub OAuth and verified passwordless email use the same account/session
+ * machinery. This module is provider-agnostic — it takes
  * an already-verified `OAuthProfile` and does the database half — so adding a
  * provider never touches session logic.
  */
@@ -30,7 +30,7 @@ function hashToken(token: string): string {
 }
 
 export interface OAuthProfile {
-  /** `github` | `google` | `dev`. */
+  /** `github` | `email` | legacy providers | `dev`. */
   provider: string;
   /** The provider's stable, immutable user id — never an email or username. */
   providerUid: string;
@@ -197,6 +197,7 @@ export interface SignInResult {
  */
 export async function signInWithOAuth(db: Db, profile: OAuthProfile): Promise<SignInResult> {
   return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([profile.provider, profile.providerUid])}, 0))`);
     const [existing] = await tx
       .select({ userId: identities.userId })
       .from(identities)

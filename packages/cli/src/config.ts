@@ -6,7 +6,7 @@
  * into a bug report is worth more than one field's convenience.
  */
 
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, link, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -77,4 +77,26 @@ export async function updateConfig(patch: Partial<Config>): Promise<Config> {
   const next = { ...(await loadConfig()), ...patch };
   await saveConfig(next);
   return next;
+}
+
+/** Shared by CLI and Connect on this OS account; survives device re-enrollment.
+ * No hostname, serial number, MAC address, or other hardware fingerprint.
+ */
+export async function installationId(): Promise<string> {
+  const directory = process.env.USURP_INSTALLATION_DIR ?? join(homedir(), ".usurp");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, "installation-id");
+  try { return validInstallation(await readFile(path, "utf8")); }
+  catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
+  const id = randomUUID();
+  const temporary = `${path}.${id}.tmp`;
+  await writeFile(temporary, id, { mode: 0o600, flag: "wx" });
+  try { await link(temporary, path); }
+  catch (err) { if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err; }
+  finally { await unlink(temporary); }
+  return validInstallation(await readFile(path, "utf8"));
+}
+function validInstallation(value: string): string {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.trim())) throw new Error("Invalid installation identity; restore your installation-id file rather than silently creating a new identity.");
+  return value.trim();
 }

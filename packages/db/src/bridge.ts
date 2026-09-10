@@ -8,6 +8,9 @@ export async function saveOwnedBridge(db: Db, userId: string, deviceId: string, 
   return db.transaction(async tx => {
     const [device] = await tx.select().from(devices).where(and(eq(devices.id, deviceId), eq(devices.userId, userId), isNull(devices.revokedAt))).for("update");
     if (!device) return false;
+    if (device.installationId && snapshot.sourceId?.startsWith("agentsview:local:")) {
+      snapshot = { ...snapshot, sourceId: snapshot.sourceId.replace("agentsview:local:", `agentsview:installation:${device.installationId}:`) };
+    }
     await tx.insert(usageBridgeSnapshots).values({ deviceId, snapshot }).onConflictDoUpdate({
       target: usageBridgeSnapshots.deviceId, set: { snapshot, importedAt: new Date() },
       setWhere: sql`(${usageBridgeSnapshots.snapshot}->>'fetchedAt')::timestamptz <= ${snapshot.fetchedAt}::timestamptz`,

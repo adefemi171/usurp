@@ -78,6 +78,7 @@ const envelopeObject = z
     /** When the CLI built this batch. Bounds how long a capture stays valid. */
     submitted_at: z.string().datetime(),
     reader_revision: z.literal(2).optional(),
+    installation_id: z.string().uuid().optional(),
     /** Explicit, atomic full-reader replacement. Signed; never incremental. */
     replace_agents: z.array(z.enum(["codex", "cursor"])).min(1).max(2).optional(),
     buckets: z.array(bucketSchema).max(2000),
@@ -116,9 +117,9 @@ export function dedupeKey(
 
 /** Strip `sig` and canonicalize — the one definition both signer and verifier use. */
 function signingInput(payload: Envelope): Buffer {
-  const { v, device_id, seq, submitted_at, buckets, reader_revision, replace_agents, bridge } = payload;
+  const { v, device_id, seq, submitted_at, buckets, reader_revision, replace_agents, bridge, installation_id } = payload;
   return canonicalBytes({ v, device_id, seq, submitted_at, buckets,
-    ...(reader_revision ? { reader_revision } : {}), ...(replace_agents ? { replace_agents } : {}), ...(bridge ? { bridge } : {}) });
+    ...(installation_id ? { installation_id } : {}), ...(reader_revision ? { reader_revision } : {}), ...(replace_agents ? { replace_agents } : {}), ...(bridge ? { bridge } : {}) });
 }
 
 /** Sign an envelope, returning the complete payload ready to POST. */
