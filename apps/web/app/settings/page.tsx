@@ -130,19 +130,20 @@ export default async function SettingsPage({
   const banner = notice(params);
 
   const db = getDb();
-  const [memberships, deviceRows, channels] = await Promise.all([
-    membershipsFor(db, user.id),
-    db.select().from(devices).where(eq(devices.userId, user.id)),
-    channelsFor(db, user.id),
-  ]);
-
   // Only ever read for a channel this user owns, and only when the add action
   // just redirected here with its id.
   const revealId =
     typeof params.reveal === "string" ? params.reveal : undefined;
-  const revealed = revealId
-    ? await revealChannelSecret(db, user.id, revealId)
-    : null;
+  // These reads share only the authenticated user, not one another's results.
+  // Keep each helper's ownership checks; do not cache this across requests.
+  const [memberships, deviceRows, channels, revealed, orgs, duels] = await Promise.all([
+    membershipsFor(db, user.id),
+    db.select().from(devices).where(eq(devices.userId, user.id)),
+    channelsFor(db, user.id),
+    revealId ? revealChannelSecret(db, user.id, revealId) : null,
+    ownedOrgs(db, user.id),
+    duelsForUser(db, user.id),
+  ]);
 
   const inGlobal = memberships.some((m) => m.arena.slug === GLOBAL_ARENA_SLUG);
   const activeDevices = deviceRows.filter((d) => d.revokedAt === null);
@@ -535,7 +536,7 @@ export default async function SettingsPage({
           </section>
 
           <Organizations
-            initial={(await ownedOrgs(getDb(), user.id)).map((o) => ({
+            initial={orgs.map((o) => ({
               id: o.id,
               name: o.name,
               domain: o.domain,
@@ -551,7 +552,7 @@ export default async function SettingsPage({
             </p>
           )}
           <Duels
-            initial={(await duelsForUser(db, user.id)).map((d) => ({
+            initial={duels.map((d) => ({
               ...d,
               windowStart: d.windowStart.toISOString(),
               windowEnd: d.windowEnd.toISOString(),

@@ -206,7 +206,9 @@ export async function userProfile(
     ? and(eq(usageEvents.userId, user.id), gte(usageEvents.hour, since))
     : eq(usageEvents.userId, user.id);
 
-  const [totalsRow] = await db
+  // Build lazy queries only after authorization. Await them together below so
+  // independent summaries do not serialize app-to-database network latency.
+  const totalsQuery = db
     .select({
       effective,
       input: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)`,
@@ -231,7 +233,7 @@ export async function userProfile(
     .from(usageEvents)
     .where(scope);
 
-  const byModel = await db
+  const byModelQuery = db
     .select({
       model: usageEvents.model,
       calls: sql<number>`coalesce(sum(${usageEvents.calls}), 0)`,
@@ -252,7 +254,7 @@ export async function userProfile(
   // them to the same UTC days the buckets were built on.
   const dayExpr = sql<string>`to_char(${usageEvents.hour} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
 
-  const byDay = await db
+  const byDayQuery = db
     .select({
       day: dayExpr,
       effective,
@@ -270,7 +272,7 @@ export async function userProfile(
     .groupBy(dayExpr)
     .orderBy(sql`1 desc`);
 
-  const byAgent = await db
+  const byAgentQuery = db
     .select({
       agent: usageEvents.agent,
       calls: sql<number>`coalesce(sum(${usageEvents.calls}), 0)`,
@@ -285,7 +287,7 @@ export async function userProfile(
   // Do not derive this from the two independent summaries above: a model can
   // be used by several IDEs, and the bucket identity is explicitly
   // `(hour, agent, model)` in SPEC.md#3.3.
-  const byModelAgent = await db
+  const byModelAgentQuery = db
     .select({
       agent: usageEvents.agent,
       model: usageEvents.model,
@@ -302,12 +304,9 @@ export async function userProfile(
     .groupBy(usageEvents.agent, usageEvents.model)
     .orderBy(sql`9 desc`, usageEvents.agent, usageEvents.model);
 
-  const t = totalsRow;
-  const n = (v: unknown) => Number(v ?? 0);
-
   // The chart needs the joint distribution. Separate by-day and by-model
   // totals cannot tell us which model generated a particular day's activity.
-  const series = await db
+  const seriesQuery = db
     .select({
       deviceId: usageEvents.deviceId,
       day: dayExpr,
@@ -339,8 +338,8 @@ export async function userProfile(
     )
     .orderBy(dayExpr, usageEvents.agent, usageEvents.model);
 
-  const snapshots = options.dailyAnalytics
-    ? await db
+  const snapshotsQuery = options.dailyAnalytics
+    ? db
         .select({
           deviceId: devices.id,
           snapshot: usageBridgeSnapshots.snapshot,
@@ -350,6 +349,17 @@ export async function userProfile(
         .innerJoin(devices, eq(devices.id, usageBridgeSnapshots.deviceId))
         .where(eq(devices.userId, user.id))
     : [];
+  const [[t], byModel, byDay, byAgent, byModelAgent, series, snapshots] =
+    await Promise.all([
+      totalsQuery,
+      byModelQuery,
+      byDayQuery,
+      byAgentQuery,
+      byModelAgentQuery,
+      seriesQuery,
+      snapshotsQuery,
+    ]);
+  const n = (v: unknown) => Number(v ?? 0);
   const normalized = series.map((r) => ({
     ...r,
     ...Object.fromEntries(

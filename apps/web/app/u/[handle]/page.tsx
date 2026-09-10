@@ -23,8 +23,12 @@ export default async function UserPage({ params, searchParams }: {
   });
   if (!profile) notFound();
   const isOwner = viewer?.handle?.toLowerCase() === profile.handle.toLowerCase();
-  const canRefreshSource = !!(isOwner && viewer && await ownedBridge(viewer.id));
-  const feedback = isOwner && viewer ? await getDb().select({ recommendation: efficiencyFeedback.recommendation, response: efficiencyFeedback.response }).from(efficiencyFeedback).where(eq(efficiencyFeedback.userId, viewer.id)) : [];
+  // Owner-only reads stay behind both the profile gate and session ownership.
+  const [bridge, feedback] = isOwner && viewer ? await Promise.all([
+    ownedBridge(viewer.id),
+    getDb().select({ recommendation: efficiencyFeedback.recommendation, response: efficiencyFeedback.response }).from(efficiencyFeedback).where(eq(efficiencyFeedback.userId, viewer.id)),
+  ]) : [null, []];
+  const canRefreshSource = !!bridge;
   return <main className={styles.dashboard}>
     <header className={styles.header}>
       <div className={styles.identity}>
