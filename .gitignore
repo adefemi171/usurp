@@ -15,3 +15,22 @@ connect/LICENSE
 apps/web/public/downloads/*.tgz
 apps/web/public/downloads/*.sha256
 .migration-private/
+
+# Private deployment operations and internal planning (keep local copies).
+/deploy/database/
+/docs/
+/SPEC.md
+/spec.md
+/ROADMAP.md
+/roadmap.md
+/scripts/mac-backup.test.ts
+
+# Local assistant state, database exports, and backup artifacts.
+.claude/
+.codex/
+.agents/
+/backups/
+*.dump
+*.dump.gpg
+*.sql.gz
+*.sql.gpg

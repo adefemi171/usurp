@@ -18,7 +18,7 @@ package offered by your deployment's `/connect` page, approve device pairing,
 choose sources, and let it sync in the background. Node.js 22.13+ is required;
 repository cloning, Docker, and a signed desktop app are not. See the
 [service guide](connect/README.md). The Electron app remains a separate unsigned
-preview; [its guide](docs/usurp-connect.md) covers desktop testing and signing.
+preview and is not the recommended installation path.
 
 ### GitHub and email access
 
@@ -42,13 +42,13 @@ separate machines until each laptop has uploaded its installation-aware snapshot
 Run one automatic collector per computer. GitHub sign-in and device pairing do
 not themselves upload usage; sources still require your approval.
 
-**M2's ship gate has passed.** `SPEC.md#4.4` requires proving in simulation that
-consistency × efficiency beats volume, with `#1` saying kill the project if it
-cannot. It passes on 8 of 8 seeds — run `npm run simulate` to reproduce. The
-rating engine exists as pure functions; wiring it to the database is next.
+**The rating simulation gate has passed.** It checks that consistency ×
+efficiency beats volume across 8 seeds — run `npm run simulate` to reproduce.
+The rating engine is wired to the database and seasonal boards.
 
-See [`ROADMAP.md`](ROADMAP.md) for what's done, what's next, and the M2 ship
-gate that decides whether this ships at all.
+Internal planning documents and deployment-specific database operations are
+maintained privately. This repository includes the application, migrations,
+tests, and generic Docker setup needed to build and self-host Usurp.
 
 ---
 
@@ -538,8 +538,7 @@ by reading:
   intended player's 18.7, distorting every cohort z-score. Fixed with a
   100k-token volume floor.
 
-Full reasoning in `ROADMAP.md` and the deviation notes in
-`packages/scoring/src/`.
+Implementation details and deviation notes live in `packages/scoring/src/`.
 
 One more correction to the spec's prose: `#3.4` says the `UNIQUE dedupe_key`
 makes replays no-ops. Ingest upserts with `GREATEST()` per counter instead of

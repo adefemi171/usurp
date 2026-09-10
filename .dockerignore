@@ -25,3 +25,19 @@ coverage
 README.md
 SPEC.md
 desktop
+
+# Private operations and planning must not enter public application images.
+deploy/database
+docs
+ROADMAP.md
+spec.md
+roadmap.md
+scripts/mac-backup.test.ts
+.claude
+.codex
+.agents
+backups
+*.dump
+*.dump.gpg
+*.sql.gz
+*.sql.gpg

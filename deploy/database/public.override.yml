@@ -1,6 +1,0 @@
-# Install as /opt/usurp-data/compose.override.yml only after both firewall
-# layers and TLS have passed verification. Keeps the loopback rehearsal port.
-services:
-  postgres:
-    ports:
-      - "51.210.106.93:15433:5432"
