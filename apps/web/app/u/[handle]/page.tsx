@@ -35,7 +35,7 @@ export default async function UserPage({ params, searchParams }: {
         {isOwner ? <a href="/settings" className={styles.linkButton}>Data & settings</a> : !viewer ? <a href="/signin" className={styles.linkButton}>Sign in</a> : null}
       </div>
     </header>
-    <UsageDashboard key={window} rows={profile.analyticsSeries} window={window} flagged={profile.flagged}
+    <UsageDashboard key={window} rows={profile.analyticsSeries} bridgeRows={profile.bridgeSeries} nativeRows={profile.usageSeries} window={window} flagged={profile.flagged}
       bridgeImports={profile.bridgeImports} canRefreshSource={canRefreshSource} isOwner={isOwner}
       deviceCount={profile.deviceCount} lastSeen={profile.lastSeen?.toISOString() ?? null} feedback={feedback} />
     <footer className={styles.footer}>

@@ -16,14 +16,18 @@ function Segments<T extends string>({ label, options, value, onChange }: {
   </div>;
 }
 
-export default function UsageDashboard({ rows, window, flagged, deviceCount, lastSeen, bridgeImports, canRefreshSource, isOwner, feedback = [] }: {
+export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeRows, window, flagged, deviceCount, lastSeen, bridgeImports, canRefreshSource, isOwner, feedback = [] }: {
   rows: UsageSeriesPoint[]; window: BoardWindow; flagged: boolean; deviceCount: number; lastSeen: string | null;
+  bridgeRows?: UsageSeriesPoint[]; nativeRows?: UsageSeriesPoint[];
   bridgeImports: Array<{ importedAt: string; pricingVersion: string; agents: string[] }>;
   canRefreshSource: boolean; isOwner: boolean;
   feedback?: Array<{ recommendation: string; response: string }>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const [source, setSource] = useState("agentsview");
+  const hasSourceViews = bridgeRows !== undefined && nativeRows !== undefined && bridgeImports.length > 0;
+  const rows = hasSourceViews ? source === "agentsview" ? bridgeRows! : source === "native" ? nativeRows! : combinedRows : combinedRows;
   const [metric, setMetric] = useState<Metric>("cost");
   const [refreshing, startRefresh] = useTransition();
   const [refreshMessage, setRefreshMessage] = useState("");
@@ -34,7 +38,7 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
         const response = await fetch("/api/usage/refresh", { method: "POST", signal: AbortSignal.timeout(30_000) });
         const result = await response.json(); setRefreshMessage(result.message);
       } catch { setRefreshMessage("Refresh could not finish. Your saved usage is unchanged. Try again."); }
-    } else setRefreshMessage(isOwner ? "Showing saved usage. Run npm run usurp -- sync on your computer to import new activity." : "Showing the latest usage shared by this member.");
+    } else setRefreshMessage(isOwner ? "Showing the latest uploaded snapshot. Open Usurp Connect on your computer and choose Sync now to import current AgentsView totals. Refresh view does not contact your computer." : "Showing the latest usage shared by this member.");
     router.refresh();
   });
   const [grouping, setGrouping] = useState<Grouping>("model");
@@ -117,6 +121,9 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
   return <>
     <div className={styles.toolbar}>
       <Segments label="Usage metric" value={metric} onChange={setMetric} options={[{ value: "tokens", label: "Tokens" }, { value: "cost", label: "Cost" }]} />
+      {hasSourceViews && <label className={styles.filter}>Data source<select aria-label="Data source" value={source} onChange={e => { setSource(e.target.value); reset(); }}>
+        <option value="agentsview">AgentsView snapshot</option><option value="native">Native readers</option><option value="combined">Combined sources</option>
+      </select></label>}
       <label className={styles.filter}>Period<select aria-label="Time period" value={window} onChange={e => router.push(`${pathname}?window=${e.target.value}`)}>
         <option value="day">Today (UTC)</option><option value="week">Last 7 UTC days</option><option value="month">Last 30 UTC days</option><option value="all">All time</option>
       </select></label>
@@ -131,9 +138,10 @@ export default function UsageDashboard({ rows, window, flagged, deviceCount, las
     </div>
     <div className={styles.sourceBar}>
       <span className={styles.sourceBadge}>{hasBridge ? <a href="https://github.com/kenn-io/agentsview" target="_blank" rel="noopener noreferrer">AgentsView snapshot ↗</a> : "Native readers"}</span>
-      <span>{bridgeImports.length ? `Last bridge import: ${bridgeImports.map(s => s.importedAt).sort()[0]!.slice(0, 16).replace("T", " ")} UTC` : "No bridge snapshot imported"}</span>
+      <span>{bridgeImports.length ? `${bridgeImports.length > 1 ? "Oldest active source import" : "Snapshot imported"}: ${bridgeImports.map(s => s.importedAt).sort()[0]!.slice(0, 16).replace("T", " ")} UTC` : "No bridge snapshot imported"}</span>
       <span>{deviceCount} device{deviceCount === 1 ? "" : "s"} · USD · UTC days</span>
     </div>
+    {hasSourceViews && <p className={styles.refreshStatus}>{source === "agentsview" ? "Exact imported AgentsView totals · all projects · UTC. Native-only tools are available under Combined sources." : source === "native" ? "Native-reader counters only; these are not AgentsView totals." : "AgentsView plus native usage outside its coverage. These totals can differ from AgentsView."}</p>}
     {refreshMessage && <p className={styles.refreshStatus} role="status">{refreshMessage}</p>}
     <div className={styles.cards} aria-label="Usage summary">{cards.map(c => <article className={`${styles.card} ${c.highlight ? styles.highlight : ""}`} key={c.label}>
       <p>{c.label}</p><strong>{c.value}</strong><small>{c.hint}</small>

@@ -71,6 +71,7 @@ export async function GET(
     by_agent: profile.byAgent,
     usage_series: profile.usageSeries,
     analytics_series: profile.analyticsSeries,
+    bridge_series: profile.bridgeSeries,
     bridge_imports: profile.bridgeImports,
     accounting: { window: "UTC calendar days", totals: "native hourly counters", analytics_series: "preferred-source daily analytics" },
     // Labelled, so a consumer cannot mistake these for the M2 rating.

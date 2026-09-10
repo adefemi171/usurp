@@ -24,7 +24,7 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { arenaMembers, arenas, usageEvents, users, devices, usageBridgeSnapshots } from "./schema.js";
-import { mergeBridgeSeries } from "./bridge.js";
+import { mergeBridgeSeries, selectedBridgeSnapshots } from "./bridge.js";
 import { windowStart, type BoardWindow } from "./board.js";
 
 export interface ProfileTotals {
@@ -111,6 +111,8 @@ export interface Profile {
   usageSeries: UsageSeriesPoint[];
   /** Preferred-source analytics, separate from native competitive counters. */
   analyticsSeries: UsageSeriesPoint[];
+  /** Exact selected bridge exports, without native additions. */
+  bridgeSeries: UsageSeriesPoint[];
   bridgeImports: Array<{ importedAt: string; pricingVersion: string; agents: string[] }>;
   /** Arenas this user is public in — the only ones safe to name. */
   arenas: Array<{ slug: string; name: string; type: "global" | "org" | "club" }>;
@@ -318,8 +320,9 @@ export async function userProfile(
     avatarUrl: user.avatarUrl,
     joinedAt: user.createdAt,
     window,
-    bridgeImports: snapshots.map(s => ({ importedAt: s.importedAt.toISOString(), pricingVersion: s.snapshot.pricingVersion, agents: s.snapshot.agents })),
+    bridgeImports: selectedBridgeSnapshots(snapshots).map(s => ({ importedAt: s.importedAt.toISOString(), pricingVersion: s.snapshot.pricingVersion, agents: s.snapshot.agents })),
     analyticsSeries,
+    bridgeSeries: mergeBridgeSeries([], snapshots, since?.toISOString().slice(0, 10)),
     usageSeries: mergeBridgeSeries(normalized, []),
     totals: {
       effectiveTokens: n(t?.effective),

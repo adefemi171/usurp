@@ -18,7 +18,7 @@ export async function saveOwnedBridge(db: Db, userId: string, deviceId: string, 
 
 type Native = UsageSeriesPoint & { deviceId: string };
 type StoredSnapshot = { deviceId: string; snapshot: BridgeSnapshot };
-type SnapshotGroup = { selected: StoredSnapshot; deviceIds: Set<string> };
+type SnapshotGroup<T extends StoredSnapshot> = { selected: T; deviceIds: Set<string> };
 
 /**
  * A bridge is a full account-level AgentsView export, rather than a device
@@ -27,10 +27,16 @@ type SnapshotGroup = { selected: StoredSnapshot; deviceIds: Set<string> };
  * source IDs were introduced, there is no safe way to tell two full exports
  * apart, so treat legacy snapshots as one source and prefer its newest copy.
  */
-function distinctSnapshots(snapshots: StoredSnapshot[]): SnapshotGroup[] {
-  const bySource = new Map<string, SnapshotGroup>();
+function distinctSnapshots<T extends StoredSnapshot>(snapshots: T[]): SnapshotGroup<T>[] {
+  // Upgrade compatibility: the original CLI did not send sourceId. When the
+  // account has one identified source, its legacy exports belong to that same
+  // source, not an additional billable source. Keep every device in the group
+  // so its native overlap is also replaced by the selected snapshot.
+  const knownSources = new Set(snapshots.flatMap(s => s.snapshot.sourceId ? [s.snapshot.sourceId] : []));
+  const legacySource = knownSources.size === 1 ? [...knownSources][0]! : "legacy:agentsview";
+  const bySource = new Map<string, SnapshotGroup<T>>();
   for (const entry of snapshots) {
-    const sourceId = entry.snapshot.sourceId ?? "legacy:agentsview";
+    const sourceId = entry.snapshot.sourceId ?? legacySource;
     const existing = bySource.get(sourceId);
     if (!existing) {
       bySource.set(sourceId, { selected: entry, deviceIds: new Set([entry.deviceId]) });
@@ -40,6 +46,11 @@ function distinctSnapshots(snapshots: StoredSnapshot[]): SnapshotGroup[] {
     if (existing.selected.snapshot.fetchedAt < entry.snapshot.fetchedAt) existing.selected = entry;
   }
   return [...bySource.values()];
+}
+
+/** UI freshness must describe the snapshots actually used in the totals. */
+export function selectedBridgeSnapshots<T extends StoredSnapshot>(snapshots: T[]): T[] {
+  return distinctSnapshots(snapshots).map(group => group.selected);
 }
 
 /** Replace covered device/agent analytics, not hourly source records. Never max-merge costs. */

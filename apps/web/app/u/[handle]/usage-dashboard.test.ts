@@ -13,6 +13,19 @@ function render(rows = [row], canRefreshSource = true) {
   return renderToStaticMarkup(createElement(UsageDashboard, { rows, window: "all", flagged: true, deviceCount: 1, lastSeen: null, bridgeImports: [{ importedAt: "2026-09-09T12:00:00Z", pricingVersion: "v1", agents: ["codex"] }], canRefreshSource, isOwner: true }));
 }
 describe("usage dashboard source clarity", () => {
+  it("defaults to exact bridge totals rather than mixing in native-only tools", () => {
+    const native = { ...row, source: "native" as const, agent: "cursor", model: "native-only", costMicros: 9000000 };
+    const html = renderToStaticMarkup(createElement(UsageDashboard, {
+      rows: [row, native], bridgeRows: [row], nativeRows: [native], window: "all", flagged: false,
+      deviceCount: 2, lastSeen: null, bridgeImports: [{ importedAt: "2026-09-10T12:00:00Z", pricingVersion: "v1", agents: ["codex"] }],
+      canRefreshSource: false, isOwner: true,
+    }));
+    expect(html).toContain("$1.23"); expect(html).not.toContain("$10.23");
+    expect(html).toContain('aria-label="Data source"');
+    expect(html).toContain("Exact imported AgentsView totals");
+    expect(html).toContain("Combined sources");
+    expect(html).not.toContain("native-only");
+  });
   it("does not report a zero daily cost or no activity for measured but unpriced usage", () => {
     const html = render([{ ...row, source: "native", agent: "cursor", costMicros: 0, unpricedBuckets: 1 }]);
     expect(html).toContain("AVERAGE / ACTIVE DAY</span><strong>Unavailable");

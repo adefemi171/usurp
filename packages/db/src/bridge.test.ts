@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { generateDeviceKeyPair, signPayload, type BridgeSnapshot } from "@usurp/protocol";
-import { mergeBridgeSeries, saveOwnedBridge } from "./bridge.js";
+import { mergeBridgeSeries, saveOwnedBridge, selectedBridgeSnapshots } from "./bridge.js";
 import { getDb, closeDb } from "./client.js";
 import { devices, users, usageBridgeSnapshots, usageEvents } from "./schema.js";
 import { ingest } from "./ingest.js";
@@ -18,6 +18,22 @@ function native(agent = "codex", deviceId = "a"): UsageSeriesPoint & { deviceId:
   calls: 1, sessionsStarted: 1, sessionsCompleted: 0, sessionsAbandoned: 0, editsApplied: 0, editsReverted: 0, commits: 0, historicalBuckets: 0, unpricedBuckets: 0,
 }; }
 describe("preferred-source analytics", () => {
+  it("reconciles legacy CLI and identified Connect snapshots without double counting", () => {
+    const legacy = { deviceId: "a", snapshot: { ...snapshot(1198523968), fetchedAt: "2026-09-09T22:13:51.532Z" }, importedAt: "old" };
+    const current = { deviceId: "b", snapshot: { ...snapshot(1170633148), sourceId: "agentsview:local:8080", fetchedAt: "2026-09-10T12:00:00.000Z" }, importedAt: "new" };
+    for (const copies of [[legacy, current], [current, legacy]]) {
+      const rows = mergeBridgeSeries([native("codex", "a"), native("codex", "b"), native("cursor", "b")], copies);
+      expect(rows.filter(r => r.agent === "codex")).toEqual([expect.objectContaining({ costMicros: 1170633148, effectiveTokens: 10, source: "agentsview" })]);
+      expect(rows.find(r => r.agent === "cursor")?.calls).toBe(1);
+      expect(selectedBridgeSnapshots(copies)).toEqual([current]);
+    }
+  });
+  it("does not collapse distinct identified sources", () => {
+    const a = { deviceId: "a", snapshot: { ...snapshot(100), sourceId: "agentsview:local:8080" } };
+    const b = { deviceId: "b", snapshot: { ...snapshot(200), sourceId: "agentsview:local:8081" } };
+    expect(mergeBridgeSeries([], [a, b])[0]?.costMicros).toBe(300);
+    expect(selectedBridgeSnapshots([a, b])).toHaveLength(2);
+  });
   it("replaces covered sources without double-counting and retains native Cursor", () => {
     const rows = mergeBridgeSeries([native(), native("cursor")], [{ deviceId: "a", snapshot: snapshot() }]);
     expect(rows.reduce((n, r) => n + r.costMicros, 0)).toBe(300);
