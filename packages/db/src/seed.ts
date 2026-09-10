@@ -55,7 +55,7 @@ export async function joinGlobalArena(db: Db, userId: string): Promise<void> {
     .values({ arenaId: arena.id, userId, visibility: "public" })
     .onConflictDoUpdate({
       target: [arenaMembers.arenaId, arenaMembers.userId],
-      set: { status: "active", visibility: "public", joinedAt: new Date() },
+      set: { status: "active", visibility: "public", shareTools: false, joinedAt: new Date() },
       // Only touch a membership that was actually abandoned. Without this,
       // re-opting-in would reset a current member's visibility back to public —
       // quietly un-hiding someone who chose to be hidden.

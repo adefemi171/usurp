@@ -16,6 +16,7 @@ import Avatar from "./avatar";
 import { currentUser } from "../lib/session";
 import type { TrustFilter } from "./board-nav";
 import TitleBadge, { TitleIcon } from "./title-badge";
+import { StreakBadge, ToolBadges } from "./arena-badges";
 
 function usd(points: number): string {
   return points.toLocaleString();
@@ -134,6 +135,7 @@ export default async function RatingView({
               <col className="rating-rank-col" />
               <col className="rating-title-col" />
               <col className="rating-who-col" />
+              <col className="rating-streak-col" />
               <col className="rating-points-col" />
               <col className="rating-moved-col" />
               <col className="rating-trust-col" />
@@ -143,6 +145,7 @@ export default async function RatingView({
                 <th scope="col">#</th>
                 <th scope="col">Title</th>
                 <th scope="col">Who</th>
+                <th scope="col">Streak</th>
                 <th scope="col">Points</th>
                 <th scope="col">Moved</th>
                 <th scope="col">Trust</th>
@@ -197,7 +200,7 @@ export default async function RatingView({
                     </div>
                   </td>
                   <td className="who">
-                    <span className="who-cell">
+                    <div className="who-cell">
                       {/* Top three get a larger avatar — the only place the
                         board leans on hierarchy, and only on rating, where a
                         position is earned rather than bought. */}
@@ -206,6 +209,7 @@ export default async function RatingView({
                         name={row.handle ?? row.pseudonym ?? "?"}
                         size={row.rank <= 3 ? 34 : 26}
                       />
+                      <div className="arena-identity">
                       {row.pseudonym ? (
                         <span className="anon">{row.pseudonym}</span>
                       ) : (
@@ -220,8 +224,11 @@ export default async function RatingView({
                           {row.handle}
                         </a>
                       )}
-                    </span>
+                      <ToolBadges tools={row.tools} />
+                      </div>
+                    </div>
                   </td>
+                  <td className="num"><StreakBadge days={row.streakDays} /></td>
                   <td className="num">{usd(row.points)}</td>
                   <td className="num">
                     {movement(row.prevRank === null ? null : row.movement)}
@@ -243,6 +250,13 @@ export default async function RatingView({
       )}
 
       <footer>
+        <p>
+          <strong>Streaks</strong> count consecutive UTC days with signed, non-historical
+          activity across your devices—not logins or hours worked. Today stays open
+          until midnight UTC. Bridge-only and manual imports do not earn streaks.
+          Tool badges show optional, shared activity from the last 30 days;
+          enable them per arena in <a href="/settings#arenas">Settings</a>.
+        </p>
         <p>
           Applied and reverted edits depend on what each tool records. Claude
           Code reversions are inferred from declined or failed edits; Copilot

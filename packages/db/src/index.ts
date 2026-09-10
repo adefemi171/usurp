@@ -124,6 +124,7 @@ export {
   normalizeInviteCode,
   rotateInviteCode,
   setVisibility,
+  setToolSharing,
   type CreateClubFailure,
   type CreateClubResult,
   type JoinFailure,

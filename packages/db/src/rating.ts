@@ -46,6 +46,7 @@ import {
   type Weights,
 } from "@usurp/scoring";
 import type { Db } from "./client.js";
+import { arenaActivity } from "./arena-activity.js";
 import {
   arenaMembers,
   arenas,
@@ -601,6 +602,10 @@ export interface RatingBoard {
       movement: number | null;
       trustTier: "unverified" | "cli_signed" | "org_verified";
       underReview: boolean;
+      /** Consecutive UTC days of qualifying signed activity; no scoring change. */
+      streakDays: number;
+      /** Empty unless the member explicitly opts into public arena tool sharing. */
+      tools: string[];
     }
   >;
   /** Visible rows, after `#2` visibility filtering. */
@@ -692,6 +697,7 @@ export async function ratingBoard(
       manualOnly: sql<boolean>`exists(select 1 from usage_events ue where ue.user_id=${users.id} and not ue.sig_ok)
         and not exists(select 1 from usage_events ue where ue.user_id=${users.id} and ue.sig_ok)`,
       visibility: arenaMembers.visibility,
+      shareTools: arenaMembers.shareTools,
       status: arenaMembers.status,
     })
     .from(standings)
@@ -746,6 +752,8 @@ export async function ratingBoard(
         ? ("unverified" as const)
         : ("cli_signed" as const),
       underReview: r.reviewState === "shadow_frozen",
+      streakDays: 0,
+      tools: [] as string[],
       eliminated,
       title:
         contentionRank === null || r.points <= 0
@@ -754,6 +762,13 @@ export async function ratingBoard(
     };
   });
 
+  const pageRows = mapped.filter((r) => !options.trust || r.trustTier === options.trust)
+    .slice(offset, offset + limit);
+  const shared = new Set(visible.filter(r => r.visibility === "public" && r.shareTools).map(r => r.userId));
+  const activity = await arenaActivity(db, pageRows.map(r => r.userId),
+    pageRows.filter(r => shared.has(r.userId)).map(r => r.userId), now);
+  for (const row of pageRows) Object.assign(row, activity.get(row.userId));
+
   return {
     arena: { slug: arena.slug, name: arena.name, type: arena.type },
     season: {
@@ -761,9 +776,7 @@ export async function ratingBoard(
       startsAt: season.startsAt,
       endsAt: season.endsAt,
     },
-    rows: mapped
-      .filter((r) => !options.trust || r.trustTier === options.trust)
-      .slice(offset, offset + limit),
+    rows: pageRows,
     total: mapped.filter((r) => !options.trust || r.trustTier === options.trust)
       .length,
     memberCount: Math.max(Number(memberTally?.n ?? 0), active.length),

@@ -1,0 +1,1 @@
+ALTER TABLE "arena_members" ADD COLUMN "share_tools" boolean DEFAULT false NOT NULL;

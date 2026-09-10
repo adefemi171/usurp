@@ -218,6 +218,7 @@ export async function joinByInviteCode(
         .set({
           status: "active",
           visibility: defaultVisibilityFor(arena.type),
+          shareTools: false,
           joinedAt: new Date(),
         })
         .where(
@@ -244,6 +245,15 @@ export async function joinByInviteCode(
 }
 
 export type VisibilityFailure = "not_a_member";
+
+/** Only a current member can opt their own tools into a particular arena. */
+export async function setToolSharing(db: Db, userId: string, arenaId: string, shareTools: boolean) {
+  const [member] = await db.update(arenaMembers).set({ shareTools }).where(and(
+    eq(arenaMembers.arenaId, arenaId), eq(arenaMembers.userId, userId),
+    sql`${arenaMembers.status} <> 'left'`,
+  )).returning();
+  return member ? { ok: true as const, member } : { ok: false as const, failure: "not_a_member" as const };
+}
 
 /** `#2` — per-arena visibility. `PATCH /v1/me/arenas/:id`. */
 export async function setVisibility(
@@ -280,7 +290,7 @@ export async function leaveArena(
 ): Promise<{ ok: true } | { ok: false; failure: VisibilityFailure }> {
   const [member] = await db
     .update(arenaMembers)
-    .set({ status: "left", visibility: "hidden" })
+    .set({ status: "left", visibility: "hidden", shareTools: false })
     .where(
       and(eq(arenaMembers.arenaId, arenaId), eq(arenaMembers.userId, userId)),
     )
@@ -291,6 +301,7 @@ export async function leaveArena(
 
 export interface Membership {
   arena: Arena;
+  shareTools: boolean;
   visibility: "public" | "anonymous" | "hidden";
   status: "active" | "eliminated" | "left";
   joinedAt: Date;
@@ -307,6 +318,7 @@ export async function membershipsFor(
   const rows = await db
     .select({
       arena: arenas,
+      shareTools: arenaMembers.shareTools,
       visibility: arenaMembers.visibility,
       status: arenaMembers.status,
       joinedAt: arenaMembers.joinedAt,
@@ -326,6 +338,7 @@ export async function membershipsFor(
 
   return rows.map((row) => ({
     arena: row.arena,
+    shareTools: row.shareTools,
     visibility: row.visibility,
     status: row.status,
     joinedAt: row.joinedAt,

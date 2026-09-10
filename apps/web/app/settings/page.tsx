@@ -39,12 +39,13 @@ import {
   revokeDeviceAction,
   rotateInviteCodeAction,
   setVisibilityAction,
+  setToolSharingAction,
   toggleChannelAction,
   updateHandleAction,
 } from "./actions";
 
 const VISIBILITY_HELP: Record<string, string> = {
-  public: "Named on the board.",
+  public: "Your public handle is shown on the board.",
   anonymous: "Shown at your true rank under a stable pseudonym.",
   hidden: "Not on the board at all. You still accrue stats privately.",
 };
@@ -59,6 +60,7 @@ const VISIBILITY_HELP: Record<string, string> = {
 const MESSAGES: Record<NoticeCode, string> = {
   handle_saved: "Handle saved.",
   visibility_saved: "Visibility updated.",
+  tool_sharing_saved: "Arena tool sharing updated.",
   left_arena: "You left the arena.",
   joined_global: "You are now competing in the global arena.",
   club_created: "Club created — share its invite code below.",
@@ -421,7 +423,7 @@ export default async function SettingsPage({
                         defaultValue={m.visibility}
                         aria-label={`Visibility in ${m.arena.name}`}
                       >
-                        <option value="public">Public — named</option>
+                        <option value="public">Public — handle</option>
                         <option value="anonymous">Anonymous — pseudonym</option>
                         <option value="hidden">Hidden — not listed</option>
                       </select>
@@ -432,6 +434,20 @@ export default async function SettingsPage({
                     <p className="field-hint">
                       {VISIBILITY_HELP[m.visibility]}
                     </p>
+
+                    <form className="arena-tool-consent" action={setToolSharingAction}>
+                      <input type="hidden" name="arena_id" value={m.arena.id} />
+                      <label>
+                        <input type="checkbox" name="share_tools" defaultChecked={m.shareTools} />
+                        Show my coding tools in {m.arena.name}
+                      </label>
+                      <p className="field-hint">
+                        Shares tool names from measured usage in the last 30 days, not models,
+                        projects, or hours. Only shown with public visibility, never when anonymous
+                        or hidden. This does not affect points.
+                      </p>
+                      <button className="button secondary" type="submit">Save tool sharing</button>
+                    </form>
 
                     {m.inviteCode && (
                       <>

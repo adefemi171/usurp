@@ -37,6 +37,17 @@ matching email addresses.
 - Eligible Rating members can earn **Sovereign**, **Usurper**, or **Contender**.
   The Hall of Fame records reigns, including those still in progress.
 
+The Rating arena shows consecutive-day streaks from signed, non-historical
+activity, counting each UTC day once across devices. A streak ending yesterday
+remains current while today is in progress. Bridge-only summaries and manual
+imports do not earn competitive streaks.
+
+To show coding-tool badges beneath your handle, enable **Show my coding tools**
+for that arena in **Settings → Arenas & visibility**. Sharing is off by default,
+uses measured activity from the last 30 days, and is suppressed for anonymous
+or hidden members. Models stay in the usage dashboard. Tool badges do not affect
+ratings.
+
 Cost figures are estimates or source-calculated totals, not provider invoices.
 Missing usage or pricing is marked unavailable, not treated as zero. Some tools
 do not expose complete token or model records.

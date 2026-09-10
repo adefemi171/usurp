@@ -452,6 +452,8 @@ export const arenaMembers = pgTable(
      * type rather than inherited from the user's global preference.
      */
     visibility: visibilityEnum("visibility").notNull().default("public"),
+    /** Separate, per-arena consent. Never exposed for anonymous members. */
+    shareTools: boolean("share_tools").notNull().default(false),
     status: memberStatusEnum("status").notNull().default("active"),
   },
   (t) => [

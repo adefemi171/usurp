@@ -959,13 +959,14 @@ button:disabled { cursor: not-allowed; }
 
 /* Rating has an extra identity column; Burn's positional alignment is wrong
    for it. Explicit columns keep headers, avatars and figures on one grid. */
-.table-scroll .board.rating-board { table-layout: fixed; min-width: 760px; }
-.rating-rank-col { width: 6%; }
-.rating-title-col { width: 25%; }
-.rating-who-col { width: 30%; }
-.rating-points-col { width: 13%; }
-.rating-moved-col { width: 9%; }
-.rating-trust-col { width: 17%; }
+.table-scroll .board.rating-board { table-layout: fixed; min-width: 900px; }
+.rating-rank-col { width: 5%; }
+.rating-title-col { width: 21%; }
+.rating-who-col { width: 27%; }
+.rating-streak-col { width: 12%; }
+.rating-points-col { width: 12%; }
+.rating-moved-col { width: 8%; }
+.rating-trust-col { width: 15%; }
 .board.rating-board thead th,
 .board.rating-board tbody td { padding: 16px 18px; vertical-align: middle; }
 .board.rating-board thead th:nth-child(3),
@@ -973,6 +974,16 @@ button:disabled { cursor: not-allowed; }
 .rating-title-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .rating-title-stack .held { margin-left: 0; }
 .rating-board .who-cell { display: flex; min-width: 0; }
+.arena-identity { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.arena-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 11px; font-weight: 400; }
+.arena-tool { border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; color: var(--muted); overflow-wrap: anywhere; }
+.arena-tools-more summary { cursor: pointer; color: var(--muted); }
+.arena-tools-more > span { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.streak-badge { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); white-space: nowrap; font-size: 13px; }
+.streak-badge svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.arena-tool-consent { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+.arena-tool-consent label { display: flex; align-items: center; gap: 10px; }
+.arena-tool-consent input { width: 18px; height: 18px; accent-color: var(--accent); }
 .rating-board .who-link,
 .rating-board .anon { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .home-features { display: grid; grid-template-columns: 1fr 1fr; margin-top: 30px; gap: 24px; }

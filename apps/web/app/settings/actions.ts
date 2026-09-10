@@ -39,6 +39,7 @@ import {
   rotateInviteCode,
   setChannelEnabled,
   setVisibility,
+  setToolSharing,
   type ChannelKind,
 } from "@usurp/db";
 import { and, eq, isNull } from "drizzle-orm";
@@ -48,6 +49,7 @@ import { currentUser } from "../../lib/session";
 export type NoticeCode =
   | "handle_saved"
   | "visibility_saved"
+  | "tool_sharing_saved"
   | "left_arena"
   | "joined_global"
   | "club_created"
@@ -141,6 +143,17 @@ export async function leaveArenaAction(formData: FormData): Promise<void> {
 
   revalidatePath("/");
   finish("left_arena", true);
+}
+
+export async function setToolSharingAction(formData: FormData): Promise<void> {
+  const user = await requireSignedIn();
+  const result = await setToolSharing(getDb(), user.id,
+    String(formData.get("arena_id") ?? ""), formData.get("share_tools") === "on");
+  if (!result.ok) finish("not_a_member", false);
+  revalidatePath("/");
+  revalidatePath("/a/[slug]", "page");
+  revalidatePath("/settings");
+  finish("tool_sharing_saved", true);
 }
 
 export async function joinGlobalAction(): Promise<void> {
