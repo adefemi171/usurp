@@ -16,6 +16,7 @@ import {
   setSessionCookie,
 } from "../../../../lib/session";
 import { baseUrl } from "../../../../lib/env";
+import { limitRequest, reportError } from "../../../../lib/request";
 
 export const dynamic = "force-dynamic";
 
@@ -34,20 +35,29 @@ export async function GET(
 ): Promise<NextResponse> {
   const { provider: providerId } = await context.params;
   const provider = getProvider(providerId);
-  if (!provider) return NextResponse.json({ error: "unknown_provider" }, { status: 404 });
+  if (!provider)
+    return NextResponse.json({ error: "unknown_provider" }, { status: 404 });
+  const limited = await limitRequest("oauth-callback", "deployment", 120);
+  if (limited) return limited;
 
   const url = new URL(request.url);
 
   // The user declined at the provider, or the provider errored.
   const providerError = url.searchParams.get("error");
   if (providerError) {
-    return fail(providerError === "access_denied" ? "cancelled" : "provider_error");
+    return fail(
+      providerError === "access_denied" ? "cancelled" : "provider_error",
+    );
   }
 
   const code = url.searchParams.get("code");
   if (!code) return fail("missing_code");
 
-  const flow = verifyFlow(await oauthCookie(), provider.id, url.searchParams.get("state"));
+  const flow = verifyFlow(
+    await oauthCookie(),
+    provider.id,
+    url.searchParams.get("state"),
+  );
   if (!flow.ok) {
     console.warn(`oauth callback rejected: ${flow.rejection} (${provider.id})`);
     // One message for every rejection reason — distinguishing "expired" from
@@ -61,7 +71,7 @@ export async function GET(
     profile = await provider.fetchProfile(accessToken);
   } catch (err) {
     // Provider error detail can echo the client id; log it, don't return it.
-    console.error("oauth exchange failed", err);
+    reportError("oauth-exchange");
     return fail("exchange_failed");
   }
 
@@ -76,14 +86,17 @@ export async function GET(
         : {}),
     });
   } catch (err) {
-    console.error("sign-in failed", err);
+    reportError("oauth-signin");
     return fail("signin_failed");
   }
 
   // Preserve device approval across first-time sign-in; handle setup can wait.
   const pairingReturn = flow.returnTo.startsWith("/connect/approve?");
-  const destination = created && !pairingReturn ? "/settings?welcome=1" : flow.returnTo;
-  const response = NextResponse.redirect(new URL(destination, baseUrl()), { status: 302 });
+  const destination =
+    created && !pairingReturn ? "/settings?welcome=1" : flow.returnTo;
+  const response = NextResponse.redirect(new URL(destination, baseUrl()), {
+    status: 302,
+  });
 
   setSessionCookie(response, session.token, session.expiresAt);
   clearOAuthCookie(response);

@@ -7,6 +7,7 @@
  */
 
 import { getDb, longestReigns } from "@usurp/db";
+import { currentUser } from "../../../lib/session";
 
 /**
  * Required, unlike the other pages.
@@ -27,7 +28,10 @@ function span(days: number): string {
 }
 
 export default async function LongestReignPage() {
-  const rows = await longestReigns(getDb(), { limit: 50 });
+  const rows = await longestReigns(getDb(), {
+    limit: 50,
+    viewerId: (await currentUser())?.id,
+  });
 
   return (
     <main className="wrap">
@@ -46,7 +50,16 @@ export default async function LongestReignPage() {
           ← Board
         </a>
       </header>
-      <div className="reign-intro"><span aria-hidden="true">♛</span><div><h2>The Throne changes hands. The record stays.</h2><p>The longest reigns across every arena and season, including those still in progress.</p></div></div>
+      <div className="reign-intro">
+        <span aria-hidden="true">♛</span>
+        <div>
+          <h2>The Throne changes hands. The record stays.</h2>
+          <p>
+            The longest reigns across every arena and season, including those
+            still in progress.
+          </p>
+        </div>
+      </div>
 
       {rows.length === 0 ? (
         <div className="empty">
@@ -57,49 +70,67 @@ export default async function LongestReignPage() {
           </p>
         </div>
       ) : (
-        <div className="table-scroll" role="region" aria-label="Longest reigns" tabIndex={0}><table className="board">
-          <thead>
-            <tr>
-              <th scope="col">#</th>
-              <th scope="col">Holder</th>
-              <th scope="col">Arena</th>
-              <th scope="col">Held</th>
-              <th scope="col">Peak</th>
-              <th scope="col">Ended by</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={`${r.arena.slug}-${r.startedAt.toISOString()}`} className={r.open ? "throne" : undefined}>
-                <td className="rank">{i + 1}</td>
-                <td className="who">
-                  {r.holder.handle ? (
-                    <a className="who-link" href={`/u/${encodeURIComponent(r.holder.handle)}`}>
-                      {r.holder.handle}
-                    </a>
-                  ) : (
-                    <span className="anon">{r.holder.pseudonym}</span>
-                  )}
-                </td>
-                <td className="sub">
-                  <a className="who-link" href={`/a/${r.arena.slug}?metric=rating`}>
-                    {r.arena.name}
-                  </a>
-                </td>
-                <td className="num">
-                  {span(r.days)}
-                  {r.open && <span className="title-badge sovereign reigning">reigning</span>}
-                </td>
-                <td className="num sub">{r.peakPoints.toLocaleString()}</td>
-                <td className="sub">
-                  {r.open
-                    ? "—"
-                    : (r.endedBy?.display ?? "unknown")}
-                </td>
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="Longest reigns"
+          tabIndex={0}
+        >
+          <table className="board">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Holder</th>
+                <th scope="col">Arena</th>
+                <th scope="col">Held</th>
+                <th scope="col">Peak</th>
+                <th scope="col">Ended by</th>
               </tr>
-            ))}
-          </tbody>
-        </table></div>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr
+                  key={`${r.arena.slug}-${r.startedAt.toISOString()}`}
+                  className={r.open ? "throne" : undefined}
+                >
+                  <td className="rank">{i + 1}</td>
+                  <td className="who">
+                    {r.holder.handle ? (
+                      <a
+                        className="who-link"
+                        href={`/u/${encodeURIComponent(r.holder.handle)}`}
+                      >
+                        {r.holder.handle}
+                      </a>
+                    ) : (
+                      <span className="anon">{r.holder.pseudonym}</span>
+                    )}
+                  </td>
+                  <td className="sub">
+                    <a
+                      className="who-link"
+                      href={`/a/${r.arena.slug}?metric=rating`}
+                    >
+                      {r.arena.name}
+                    </a>
+                  </td>
+                  <td className="num">
+                    {span(r.days)}
+                    {r.open && (
+                      <span className="title-badge sovereign reigning">
+                        reigning
+                      </span>
+                    )}
+                  </td>
+                  <td className="num sub">{r.peakPoints.toLocaleString()}</td>
+                  <td className="sub">
+                    {r.open ? "—" : (r.endedBy?.display ?? "unknown")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <footer>

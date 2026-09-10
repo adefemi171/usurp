@@ -10,6 +10,7 @@
 
 import { ImageResponse } from "next/og";
 import { arenaFeed, formatDuration, getDb, ratingBoard } from "@usurp/db";
+import { canViewArena } from "../../../lib/arena-access";
 
 export const alt = "Usurp arena standings";
 export const size = { width: 1200, height: 630 };
@@ -25,28 +26,32 @@ function points(value: number): string {
 
 /** Shared by the global and per-arena metadata routes. */
 export async function renderArenaCard(slug: string) {
+  // Social unfurls are unauthenticated; private arenas get a generic card.
+  const publicArena = await canViewArena(slug);
   const [board, feed] = await Promise.all([
-    ratingBoard(getDb(), slug, { limit: 3 }),
-    arenaFeed(getDb(), slug, { limit: 1 }),
+    publicArena ? ratingBoard(getDb(), slug, { limit: 3 }) : undefined,
+    publicArena ? arenaFeed(getDb(), slug, { limit: 1 }) : undefined,
   ]);
 
   if (!board) {
     return new ImageResponse(
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#0b0d10",
-          color: "#e7eaee",
-          fontSize: 54,
-          fontWeight: 700,
-        }}
-      >
-        Usurp.
-      </div>,
+      (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#0b0d10",
+            color: "#e7eaee",
+            fontSize: 54,
+            fontWeight: 700,
+          }}
+        >
+          Usurp.
+        </div>
+      ),
       size,
     );
   }
@@ -65,60 +70,103 @@ export async function renderArenaCard(slug: string) {
   const feedLine = feed?.entries[0]?.text;
 
   return new ImageResponse(
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        padding: "58px 66px",
-        background: "#0b0d10",
-        color: "#e7eaee",
-        fontFamily: "sans-serif",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", color: "#d8a657", fontSize: 30, fontWeight: 700 }}>
-        Usurp.
-        <span style={{ marginLeft: 22, color: "#8b95a3", fontSize: 22, fontWeight: 500 }}>
-          {board.arena.name}
-        </span>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", marginTop: 62 }}>
-        <span style={{ color: "#8b95a3", fontSize: 22, letterSpacing: 2 }}>SEASON {board.season.idx}</span>
-        <span style={{ marginTop: 12, fontSize: 62, fontWeight: 700, letterSpacing: -2 }}>{headline}</span>
-        <span style={{ marginTop: 12, color: "#d8a657", fontSize: 28 }}>{detail}</span>
-      </div>
-
-      <div style={{ display: "flex", gap: 18, marginTop: 54 }}>
-        {board.rows.slice(0, 3).map((row) => (
-          <div
-            key={row.userId}
+    (
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          padding: "58px 66px",
+          background: "#0b0d10",
+          color: "#e7eaee",
+          fontFamily: "sans-serif",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            color: "#d8a657",
+            fontSize: 30,
+            fontWeight: 700,
+          }}
+        >
+          Usurp.
+          <span
             style={{
-              display: "flex",
-              flexDirection: "column",
-              width: 300,
-              padding: "18px 20px",
-              border: "1px solid #232830",
-              borderRadius: 10,
-              background: row.title === "sovereign" ? "#1a1710" : "#12151a",
+              marginLeft: 22,
+              color: "#8b95a3",
+              fontSize: 22,
+              fontWeight: 500,
             }}
           >
-            <span style={{ color: "#8b95a3", fontSize: 18 }}>#{row.rank} {row.title?.toUpperCase() ?? ""}</span>
-            <span style={{ marginTop: 8, fontSize: 26, fontWeight: 600 }}>
-              {row.handle ?? row.pseudonym ?? "Anonymous"}
-            </span>
-            <span style={{ marginTop: 8, color: "#d8a657", fontSize: 22 }}>{points(row.points)} pts</span>
-          </div>
-        ))}
-      </div>
-
-      {feedLine && (
-        <div style={{ display: "flex", marginTop: "auto", color: "#8b95a3", fontSize: 20 }}>
-          {feedLine}
+            {board.arena.name}
+          </span>
         </div>
-      )}
-    </div>,
+
+        <div
+          style={{ display: "flex", flexDirection: "column", marginTop: 62 }}
+        >
+          <span style={{ color: "#8b95a3", fontSize: 22, letterSpacing: 2 }}>
+            SEASON {board.season.idx}
+          </span>
+          <span
+            style={{
+              marginTop: 12,
+              fontSize: 62,
+              fontWeight: 700,
+              letterSpacing: -2,
+            }}
+          >
+            {headline}
+          </span>
+          <span style={{ marginTop: 12, color: "#d8a657", fontSize: 28 }}>
+            {detail}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: 18, marginTop: 54 }}>
+          {board.rows.slice(0, 3).map((row) => (
+            <div
+              key={row.userId}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: 300,
+                padding: "18px 20px",
+                border: "1px solid #232830",
+                borderRadius: 10,
+                background: row.title === "sovereign" ? "#1a1710" : "#12151a",
+              }}
+            >
+              <span style={{ color: "#8b95a3", fontSize: 18 }}>
+                #{row.rank} {row.title?.toUpperCase() ?? ""}
+              </span>
+              <span style={{ marginTop: 8, fontSize: 26, fontWeight: 600 }}>
+                {row.handle ?? row.pseudonym ?? "Anonymous"}
+              </span>
+              <span style={{ marginTop: 8, color: "#d8a657", fontSize: 22 }}>
+                {points(row.points)} pts
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {feedLine && (
+          <div
+            style={{
+              display: "flex",
+              marginTop: "auto",
+              color: "#8b95a3",
+              fontSize: 20,
+            }}
+          >
+            {feedLine}
+          </div>
+        )}
+      </div>
+    ),
     size,
   );
 }

@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { getProvider, safeReturnTo, startFlow } from "../../../lib/oauth";
 import { setOAuthCookie } from "../../../lib/session";
+import { limitRequest } from "../../../lib/request";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,8 @@ export async function GET(
   }
 
   const url = new URL(request.url);
+  const limited = await limitRequest("oauth-start", "deployment", 120);
+  if (limited) return limited;
   const returnTo = safeReturnTo(url.searchParams.get("return_to"));
   const { authorizeUrl, cookie } = startFlow(provider, returnTo);
 

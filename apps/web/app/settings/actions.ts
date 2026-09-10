@@ -77,7 +77,9 @@ export type NoticeCode =
   | "channel_invalid_target"
   | "channel_duplicate"
   | "channel_not_found"
-  | "channel_bad_kind";
+  | "channel_bad_kind"
+  | "channel_email_not_verified"
+  | "channel_email_unavailable";
 
 function finish(code: NoticeCode, ok: boolean): never {
   redirect(`/settings?${ok ? "ok" : "err"}=${code}`);
@@ -92,7 +94,11 @@ async function requireSignedIn() {
 export async function updateHandleAction(formData: FormData): Promise<void> {
   const user = await requireSignedIn();
 
-  const result = await claimHandle(getDb(), user.id, String(formData.get("handle") ?? ""));
+  const result = await claimHandle(
+    getDb(),
+    user.id,
+    String(formData.get("handle") ?? ""),
+  );
   if (!result.ok) finish(`handle_${result.rejection}` as NoticeCode, false);
 
   // The handle appears in `/u/<handle>` and on every board row.
@@ -106,7 +112,11 @@ export async function setVisibilityAction(formData: FormData): Promise<void> {
 
   const arenaId = String(formData.get("arena_id") ?? "");
   const visibility = String(formData.get("visibility") ?? "");
-  if (visibility !== "public" && visibility !== "anonymous" && visibility !== "hidden") {
+  if (
+    visibility !== "public" &&
+    visibility !== "anonymous" &&
+    visibility !== "hidden"
+  ) {
     finish("bad_visibility", false);
   }
 
@@ -122,7 +132,11 @@ export async function setVisibilityAction(formData: FormData): Promise<void> {
 export async function leaveArenaAction(formData: FormData): Promise<void> {
   const user = await requireSignedIn();
 
-  const result = await leaveArena(getDb(), user.id, String(formData.get("arena_id") ?? ""));
+  const result = await leaveArena(
+    getDb(),
+    user.id,
+    String(formData.get("arena_id") ?? ""),
+  );
   if (!result.ok) finish("not_a_member", false);
 
   revalidatePath("/");
@@ -140,9 +154,18 @@ export async function joinGlobalAction(): Promise<void> {
 export async function createClubAction(formData: FormData): Promise<void> {
   const user = await requireSignedIn();
 
-  const result = await createClub(getDb(), user.id, String(formData.get("name") ?? ""));
+  const result = await createClub(
+    getDb(),
+    user.id,
+    String(formData.get("name") ?? ""),
+  );
   if (!result.ok) {
-    finish(result.failure === "too_many_clubs" ? "too_many_clubs" : "club_name_invalid", false);
+    finish(
+      result.failure === "too_many_clubs"
+        ? "too_many_clubs"
+        : "club_name_invalid",
+      false,
+    );
   }
 
   finish("club_created", true);
@@ -162,10 +185,16 @@ export async function joinClubAction(formData: FormData): Promise<void> {
   finish("club_joined", true);
 }
 
-export async function rotateInviteCodeAction(formData: FormData): Promise<void> {
+export async function rotateInviteCodeAction(
+  formData: FormData,
+): Promise<void> {
   const user = await requireSignedIn();
 
-  const code = await rotateInviteCode(getDb(), user.id, String(formData.get("arena_id") ?? ""));
+  const code = await rotateInviteCode(
+    getDb(),
+    user.id,
+    String(formData.get("arena_id") ?? ""),
+  );
   if (!code) finish("not_owner", false);
 
   finish("code_rotated", true);
@@ -177,7 +206,8 @@ export async function addChannelAction(formData: FormData): Promise<void> {
   const user = await requireSignedIn();
 
   const kind = String(formData.get("kind") ?? "");
-  if (!CHANNEL_KINDS.includes(kind as ChannelKind)) finish("channel_bad_kind", false);
+  if (!CHANNEL_KINDS.includes(kind as ChannelKind))
+    finish("channel_bad_kind", false);
 
   const result = await addChannel(
     getDb(),

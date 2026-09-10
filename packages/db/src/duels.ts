@@ -16,7 +16,7 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-import { and, eq, gte, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import {
   arenaMembers,
@@ -28,6 +28,8 @@ import {
   users,
 } from "./schema.js";
 import { ensureCurrentSeason, startOfUtcDay } from "./seasons.js";
+import { pseudonymFor } from "./board.js";
+import { arenaLockKey } from "./rating.js";
 
 /** `#5` — "duels capped at 2 concurrent per user". */
 export const MAX_CONCURRENT_DUELS = 2;
@@ -63,6 +65,8 @@ export type ProposeFailure =
   | "opponent_too_many_duels"
   | "already_duelling"
   | "invalid_wager"
+  | "invalid_metric"
+  | "invalid_window"
   | "insufficient_points";
 
 export type ProposeResult =
@@ -84,14 +88,31 @@ async function concurrentCount(db: Db, userId: string): Promise<number> {
 }
 
 /** A member's current season points in an arena, for affordability checks. */
-async function seasonPoints(db: Db, arenaId: string, userId: string, now: Date): Promise<number> {
+async function seasonPoints(
+  db: Db,
+  arenaId: string,
+  userId: string,
+  now: Date,
+  excludeDuel?: string,
+): Promise<number> {
   const season = await ensureCurrentSeason(db, arenaId, now);
   const [row] = await db
     .select({ points: standings.points })
     .from(standings)
     .where(and(eq(standings.seasonId, season.id), eq(standings.userId, userId)))
     .limit(1);
-  return Number(row?.points ?? 0);
+  const [reserved] = await db
+    .select({ points: sql<string>`coalesce(sum(${duels.wagerPts}),0)` })
+    .from(duels)
+    .where(
+      and(
+        eq(duels.arenaId, arenaId),
+        inArray(duels.state, ["proposed", "accepted"]),
+        or(eq(duels.challengerId, userId), eq(duels.opponentId, userId)),
+        ...(excludeDuel ? [ne(duels.id, excludeDuel)] : []),
+      ),
+    );
+  return Number(row?.points ?? 0) - Number(reserved?.points ?? 0);
 }
 
 export interface ProposeInput {
@@ -104,8 +125,15 @@ export interface ProposeInput {
   now?: Date;
 }
 
-export async function proposeDuel(db: Db, input: ProposeInput): Promise<ProposeResult> {
+export async function proposeDuel(
+  db: Db,
+  input: ProposeInput,
+): Promise<ProposeResult> {
   const now = input.now ?? new Date();
+  if (!DUEL_METRICS.includes(input.metric))
+    return { ok: false, failure: "invalid_metric" };
+  if (!(input.window in DUEL_WINDOWS))
+    return { ok: false, failure: "invalid_window" };
 
   if (input.challengerId === input.opponentId) {
     return { ok: false, failure: "self_duel" };
@@ -119,14 +147,25 @@ export async function proposeDuel(db: Db, input: ProposeInput): Promise<ProposeR
   }
 
   return db.transaction(async (tx) => {
+    // Both participants share the same lock ordering across arenas.
+    for (const id of [input.challengerId, input.opponentId].sort()) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`duel:${id}`},0))`,
+      );
+    }
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${arenaLockKey(input.arenaId)})`,
+    );
     const members = await tx
       .select({ userId: arenaMembers.userId })
       .from(arenaMembers)
+      .innerJoin(users, eq(users.id, arenaMembers.userId))
       .where(
         and(
           eq(arenaMembers.arenaId, input.arenaId),
           inArray(arenaMembers.userId, [input.challengerId, input.opponentId]),
-          sql`${arenaMembers.status} <> 'left'`,
+          eq(arenaMembers.status, "active"),
+          eq(users.reviewState, "clear"),
         ),
       );
 
@@ -140,11 +179,20 @@ export async function proposeDuel(db: Db, input: ProposeInput): Promise<ProposeR
 
     // `#5` — the cap applies to both sides. Enforcing it only on the
     // challenger would let one person paralyse a rival by filling their slots.
-    if ((await concurrentCount(tx as unknown as Db, input.challengerId)) >= MAX_CONCURRENT_DUELS) {
+    if (
+      (await concurrentCount(tx as unknown as Db, input.challengerId)) >=
+      MAX_CONCURRENT_DUELS
+    ) {
       return { ok: false as const, failure: "too_many_duels" as const };
     }
-    if ((await concurrentCount(tx as unknown as Db, input.opponentId)) >= MAX_CONCURRENT_DUELS) {
-      return { ok: false as const, failure: "opponent_too_many_duels" as const };
+    if (
+      (await concurrentCount(tx as unknown as Db, input.opponentId)) >=
+      MAX_CONCURRENT_DUELS
+    ) {
+      return {
+        ok: false as const,
+        failure: "opponent_too_many_duels" as const,
+      };
     }
 
     // One live duel per pair per arena, or a grudge becomes a spam channel.
@@ -169,7 +217,8 @@ export async function proposeDuel(db: Db, input: ProposeInput): Promise<ProposeR
       )
       .limit(1);
 
-    if (existing) return { ok: false as const, failure: "already_duelling" as const };
+    if (existing)
+      return { ok: false as const, failure: "already_duelling" as const };
 
     // Both sides must be able to cover the wager, or "winner takes the pot"
     // means a winner collecting from an empty pocket.
@@ -180,6 +229,16 @@ export async function proposeDuel(db: Db, input: ProposeInput): Promise<ProposeR
       now,
     );
     if (challengerPoints < input.wagerPts) {
+      return { ok: false as const, failure: "insufficient_points" as const };
+    }
+    if (
+      (await seasonPoints(
+        tx as unknown as Db,
+        input.arenaId,
+        input.opponentId,
+        now,
+      )) < input.wagerPts
+    ) {
       return { ok: false as const, failure: "insufficient_points" as const };
     }
 
@@ -222,7 +281,14 @@ export const EVENT_DUEL_ACCEPTED = "duel_accepted";
 export const EVENT_DUEL_DECLINED = "duel_declined";
 export const EVENT_DUEL_SETTLED = "duel_settled";
 
-export type RespondFailure = "not_found" | "not_yours" | "not_pending" | "expired";
+export type RespondFailure =
+  | "not_found"
+  | "not_yours"
+  | "not_pending"
+  | "expired"
+  | "not_a_member"
+  | "insufficient_points"
+  | "season_ending";
 
 export type RespondResult =
   | { ok: true; duel: Duel }
@@ -243,6 +309,19 @@ export async function acceptDuel(
   const now = options.now ?? new Date();
 
   return db.transaction(async (tx) => {
+    const [identity] = await tx
+      .select()
+      .from(duels)
+      .where(eq(duels.id, duelId));
+    if (!identity) return { ok: false as const, failure: "not_found" as const };
+    for (const id of [identity.challengerId, identity.opponentId].sort()) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`duel:${id}`},0))`,
+      );
+    }
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${arenaLockKey(identity.arenaId)})`,
+    );
     const [duel] = await tx
       .select()
       .from(duels)
@@ -252,22 +331,77 @@ export async function acceptDuel(
 
     if (!duel) return { ok: false as const, failure: "not_found" as const };
     // Only the challenged party can accept.
-    if (duel.opponentId !== userId) return { ok: false as const, failure: "not_yours" as const };
-    if (duel.state !== "proposed") return { ok: false as const, failure: "not_pending" as const };
+    if (duel.opponentId !== userId)
+      return { ok: false as const, failure: "not_yours" as const };
+    if (duel.state !== "proposed")
+      return { ok: false as const, failure: "not_pending" as const };
 
     if (duel.windowEnd.getTime() <= now.getTime()) {
-      await tx.update(duels).set({ state: "expired" }).where(eq(duels.id, duel.id));
+      await tx
+        .update(duels)
+        .set({ state: "expired" })
+        .where(eq(duels.id, duel.id));
       return { ok: false as const, failure: "expired" as const };
     }
 
-    const hours = DUEL_WINDOWS[options.window ?? "24h"];
+    const [proposal] = await tx
+      .select({ payload: events.payload })
+      .from(events)
+      .where(
+        and(
+          eq(events.type, EVENT_DUEL_PROPOSED),
+          sql`${events.payload}->>'duelId' = ${duel.id}`,
+        ),
+      )
+      .limit(1);
+    // The accepting party cannot shorten or extend the proposed window.
+    const agreed = proposal?.payload.window;
+    const hours = DUEL_WINDOWS[agreed === "7d" ? "7d" : "24h"];
+    const members = await tx
+      .select({ id: arenaMembers.userId })
+      .from(arenaMembers)
+      .innerJoin(users, eq(users.id, arenaMembers.userId))
+      .where(
+        and(
+          eq(arenaMembers.arenaId, duel.arenaId),
+          inArray(arenaMembers.userId, [duel.challengerId, duel.opponentId]),
+          eq(arenaMembers.status, "active"),
+          eq(users.reviewState, "clear"),
+        ),
+      );
+    if (members.length !== 2)
+      return { ok: false as const, failure: "not_a_member" as const };
+    for (const id of [duel.challengerId, duel.opponentId]) {
+      if (
+        (await seasonPoints(
+          tx as unknown as Db,
+          duel.arenaId,
+          id,
+          now,
+          duel.id,
+        )) < duel.wagerPts
+      )
+        return { ok: false as const, failure: "insufficient_points" as const };
+    }
+    // Daily scores and hourly counters cannot measure a partial bucket fairly.
+    // Start at the next boundary, never credit activity before acceptance.
+    const unit = duel.metric === "points" ? 86400_000 : 3600_000;
+    const windowStart = new Date(Math.ceil(+now / unit) * unit);
+    const windowEnd = new Date(+windowStart + hours * 3600_000);
+    const season = await ensureCurrentSeason(
+      tx as unknown as Db,
+      duel.arenaId,
+      now,
+    );
+    if (windowEnd > season.endsAt)
+      return { ok: false as const, failure: "season_ending" as const };
 
     const [accepted] = await tx
       .update(duels)
       .set({
         state: "accepted",
-        windowStart: now,
-        windowEnd: new Date(now.getTime() + hours * 3_600_000),
+        windowStart,
+        windowEnd,
       })
       .where(eq(duels.id, duel.id))
       .returning();
@@ -277,7 +411,11 @@ export async function acceptDuel(
       type: EVENT_DUEL_ACCEPTED,
       actorId: userId,
       targetId: duel.challengerId,
-      payload: { duelId: duel.id, metric: duel.metric, wagerPts: duel.wagerPts },
+      payload: {
+        duelId: duel.id,
+        metric: duel.metric,
+        wagerPts: duel.wagerPts,
+      },
       createdAt: now,
     });
 
@@ -307,7 +445,8 @@ export async function declineDuel(
     if (duel.opponentId !== userId && duel.challengerId !== userId) {
       return { ok: false as const, failure: "not_yours" as const };
     }
-    if (duel.state !== "proposed") return { ok: false as const, failure: "not_pending" as const };
+    if (duel.state !== "proposed")
+      return { ok: false as const, failure: "not_pending" as const };
 
     const [declined] = await tx
       .update(duels)
@@ -319,7 +458,8 @@ export async function declineDuel(
       arenaId: duel.arenaId,
       type: EVENT_DUEL_DECLINED,
       actorId: userId,
-      targetId: userId === duel.opponentId ? duel.challengerId : duel.opponentId,
+      targetId:
+        userId === duel.opponentId ? duel.challengerId : duel.opponentId,
       payload: { duelId: duel.id },
       createdAt: now,
     });
@@ -346,16 +486,20 @@ export async function duelScores(
         and(
           inArray(dailyScores.userId, ids),
           gte(dailyScores.day, startOfUtcDay(duel.windowStart)),
-          lte(dailyScores.day, startOfUtcDay(duel.windowEnd)),
+          lt(dailyScores.day, startOfUtcDay(duel.windowEnd)),
         ),
       );
 
     const total = (id: string) =>
       rows.filter((r) => r.userId === id).reduce((a, r) => a + r.points, 0);
-    return { challenger: total(duel.challengerId), opponent: total(duel.opponentId) };
+    return {
+      challenger: total(duel.challengerId),
+      opponent: total(duel.opponentId),
+    };
   }
 
-  const column = duel.metric === "commits" ? usageEvents.commits : usageEvents.editsApplied;
+  const column =
+    duel.metric === "commits" ? usageEvents.commits : usageEvents.editsApplied;
 
   const rows = await db
     .select({
@@ -367,14 +511,19 @@ export async function duelScores(
       and(
         inArray(usageEvents.userId, ids),
         eq(usageEvents.historical, false),
+        eq(usageEvents.sigOk, true),
         gte(usageEvents.hour, duel.windowStart),
         lt(usageEvents.hour, duel.windowEnd),
       ),
     )
     .groupBy(usageEvents.userId);
 
-  const total = (id: string) => Number(rows.find((r) => r.userId === id)?.total ?? 0);
-  return { challenger: total(duel.challengerId), opponent: total(duel.opponentId) };
+  const total = (id: string) =>
+    Number(rows.find((r) => r.userId === id)?.total ?? 0);
+  return {
+    challenger: total(duel.challengerId),
+    opponent: total(duel.opponentId),
+  };
 }
 
 export interface SettledDuel {
@@ -412,7 +561,7 @@ export async function settleDuels(
   const due = await db
     .select()
     .from(duels)
-    .where(and(eq(duels.state, "accepted"), lt(duels.windowEnd, now)));
+    .where(and(eq(duels.state, "accepted"), lte(duels.windowEnd, now)));
 
   const settled: SettledDuel[] = [];
 
@@ -431,6 +580,14 @@ export async function settleDuels(
         : duel.challengerId;
 
     await db.transaction(async (tx) => {
+      for (const id of [duel.challengerId, duel.opponentId].sort()) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`duel:${id}`},0))`,
+        );
+      }
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(${arenaLockKey(duel.arenaId)})`,
+      );
       const [claimed] = await tx
         .update(duels)
         .set({ state: "settled", winnerId })
@@ -442,7 +599,11 @@ export async function settleDuels(
       if (!claimed) return;
 
       if (winnerId && loserId) {
-        const season = await ensureCurrentSeason(tx as unknown as Db, duel.arenaId, now);
+        const season = await ensureCurrentSeason(
+          tx as unknown as Db,
+          duel.arenaId,
+          duel.windowStart,
+        );
 
         // `duel_pts` is the durable half; `points` is refreshed by the next
         // recompute, and updating it here keeps the board correct until then.
@@ -457,7 +618,12 @@ export async function settleDuels(
               points: sql`greatest(0, ${standings.points} + ${delta})`,
               updatedAt: now,
             })
-            .where(and(eq(standings.seasonId, season.id), eq(standings.userId, userId)));
+            .where(
+              and(
+                eq(standings.seasonId, season.id),
+                eq(standings.userId, userId),
+              ),
+            );
         }
       }
 
@@ -505,10 +671,14 @@ export interface DuelView {
   /** True when the caller issued the challenge. */
   isChallenger: boolean;
   winnerId: string | null;
+  window: DuelWindow;
 }
 
 /** Every duel a user is party to, newest first. */
-export async function duelsForUser(db: Db, userId: string): Promise<DuelView[]> {
+export async function duelsForUser(
+  db: Db,
+  userId: string,
+): Promise<DuelView[]> {
   const rows = await db
     .select({
       duel: duels,
@@ -519,9 +689,38 @@ export async function duelsForUser(db: Db, userId: string): Promise<DuelView[]> 
     .where(or(eq(duels.challengerId, userId), eq(duels.opponentId, userId)))
     .orderBy(sql`${duels.windowStart} desc`);
 
-  return rows.map(({ duel, challengerHandle, opponentHandle }) => {
+  const views = [];
+  for (const { duel, challengerHandle, opponentHandle } of rows) {
     const isChallenger = duel.challengerId === userId;
-    return {
+    const otherId = isChallenger ? duel.opponentId : duel.challengerId;
+    const [member] = await db
+      .select()
+      .from(arenaMembers)
+      .where(
+        and(
+          eq(arenaMembers.arenaId, duel.arenaId),
+          eq(arenaMembers.userId, otherId),
+        ),
+      );
+    const display =
+      !member || member.status === "left" || member.visibility === "hidden"
+        ? "Private member"
+        : member.visibility === "anonymous"
+          ? pseudonymFor(otherId)
+          : isChallenger
+            ? opponentHandle
+            : challengerHandle;
+    const [proposal] = await db
+      .select({ payload: events.payload })
+      .from(events)
+      .where(
+        and(
+          eq(events.type, EVENT_DUEL_PROPOSED),
+          sql`${events.payload}->>'duelId' = ${duel.id}`,
+        ),
+      )
+      .limit(1);
+    views.push({
       id: duel.id,
       arenaId: duel.arenaId,
       metric: duel.metric,
@@ -531,10 +730,13 @@ export async function duelsForUser(db: Db, userId: string): Promise<DuelView[]> 
       windowEnd: duel.windowEnd,
       opponent: {
         userId: isChallenger ? duel.opponentId : duel.challengerId,
-        handle: isChallenger ? opponentHandle : challengerHandle,
+        handle: display,
       },
       isChallenger,
       winnerId: duel.winnerId,
-    };
-  });
+      window:
+        proposal?.payload.window === "7d" ? ("7d" as const) : ("24h" as const),
+    });
+  }
+  return views;
 }

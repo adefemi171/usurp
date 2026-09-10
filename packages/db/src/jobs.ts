@@ -19,11 +19,18 @@
 import { PgBoss } from "pg-boss";
 import { getDb } from "./client.js";
 import { databaseTransport } from "./transport.js";
-import { arenas } from "./schema.js";
+import { arenas, emailChallenges, devicePairings } from "./schema.js";
+import { lt } from "drizzle-orm";
+import { pruneRequestLimits } from "./rate-limit.js";
 import { recomputeDailyScores, recomputeStandings } from "./rating.js";
 import { applyCircles } from "./circles.js";
 import { settleDuels } from "./duels.js";
-import { addDays, closeElapsedSeasons, ensureCurrentSeason, startOfUtcDay } from "./seasons.js";
+import {
+  addDays,
+  closeElapsedSeasons,
+  ensureCurrentSeason,
+  startOfUtcDay,
+} from "./seasons.js";
 import { pruneSessions } from "./auth.js";
 import { pruneEnrollments } from "./enrollment.js";
 import { dispatchNotifications, pruneDeliveries } from "./notifications.js";
@@ -69,6 +76,9 @@ export async function runRecompute(
   const to = addDays(startOfUtcDay(now), 1);
 
   const daily = await recomputeDailyScores(db, from, to);
+  // Settle only after refreshing the contested days, not from the previous
+  // worker pass's stale daily scores. Recompute standings with the payout.
+  await settleDuels(db, { now });
 
   const allArenas = await db.select().from(arenas);
   const usurpings: RecomputeSummary["usurpings"] = [];
@@ -126,15 +136,19 @@ export async function runMaintenance(
   const seasonsClosed = await closeElapsedSeasons(db, now);
   const sessionsPruned = await pruneSessions(db, now);
   await pruneEnrollments(db, now);
-  // `#8` lists duel settlement as a job; a duel window closes on a clock, not
-  // in response to a request.
-  const settled = await settleDuels(db, { now });
+  await pruneRequestLimits(db, now);
+  await db
+    .delete(emailChallenges)
+    .where(lt(emailChallenges.createdAt, new Date(now.getTime() - 86400_000)));
+  await db.delete(devicePairings).where(lt(devicePairings.expiresAt, now));
+  // Settlement belongs to runRecompute, after refreshing daily scores. A
+  // housekeeping pass must not settle from yesterday's cached scores.
   const deliveriesPruned = await pruneDeliveries(db, now);
 
   return {
     seasonsClosed,
     sessionsPruned,
-    duelsSettled: settled.length,
+    duelsSettled: 0,
     deliveriesPruned,
   };
 }
@@ -161,11 +175,16 @@ export interface Worker {
  * standings write already takes `#6.1`'s per-arena advisory lock — but a
  * duplicate recompute is pure wasted work even when it is safe.
  */
-export async function startWorker(options: WorkerOptions = {}): Promise<Worker> {
+export async function startWorker(
+  options: WorkerOptions = {},
+): Promise<Worker> {
   const recomputeCron = options.recomputeCron ?? "*/10 * * * *";
   const maintenanceCron = options.maintenanceCron ?? "17 3 * * *";
 
-  const boss = new PgBoss({ ...databaseTransport(), max: Number(process.env.DATABASE_WORKER_POOL_MAX ?? 3) });
+  const boss = new PgBoss({
+    ...databaseTransport(),
+    max: Number(process.env.DATABASE_WORKER_POOL_MAX ?? 3),
+  });
 
   // Surface pg-boss's own failures rather than letting them vanish: an
   // EventEmitter with no `error` listener throws and takes the process down.
@@ -179,10 +198,6 @@ export async function startWorker(options: WorkerOptions = {}): Promise<Worker> 
 
   await boss.work(QUEUE_RECOMPUTE, async () => {
     const started = Date.now();
-    // Settle first: a duel that closed since the last pass should have its
-    // winnings in `duel_pts` before the replay reads them back.
-    const settled = await settleDuels(getDb());
-    if (settled.length > 0) console.log(`[recompute] settled ${settled.length} duel(s)`);
     const summary = await runRecompute();
     console.log(
       `[recompute] ${summary.dailyRows} daily rows / ${summary.users} users / ` +

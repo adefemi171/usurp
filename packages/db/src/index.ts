@@ -1,5 +1,12 @@
 export * as schema from "./schema.js";
-export { startPairing, inspectPairing, decidePairing, pollPairing, cancelPairing, PAIRING_TTL_MS } from "./pairing.js";
+export {
+  startPairing,
+  inspectPairing,
+  decidePairing,
+  pollPairing,
+  cancelPairing,
+  PAIRING_TTL_MS,
+} from "./pairing.js";
 export { saveOwnedBridge, mergeBridgeSeries } from "./bridge.js";
 export {
   achievements,
@@ -172,6 +179,7 @@ export {
   channelsFor,
   dispatchNotifications,
   httpTransport,
+  emailNotificationsEnabled,
   pruneDeliveries,
   removeChannel,
   revealChannelSecret,
@@ -266,3 +274,8 @@ export {
   type SettledDuel,
 } from "./duels.js";
 export * from "./email-auth.js";
+export * from "./account.js";
+export * from "./rate-limit.js";
+export * from "./orgs.js";
+export * from "./review.js";
+export * from "./manual.js";

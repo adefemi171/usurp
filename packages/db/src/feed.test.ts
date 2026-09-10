@@ -60,7 +60,9 @@ describe.skipIf(!hasDb)("feed (database)", () => {
       .returning();
     createdArenas.push(arena!.id);
     for (const userId of memberIds) {
-      await db.insert(arenaMembers).values({ arenaId: arena!.id, userId, visibility: "public" });
+      await db
+        .insert(arenaMembers)
+        .values({ arenaId: arena!.id, userId, visibility: "public" });
     }
     return arena!;
   }
@@ -92,7 +94,12 @@ describe.skipIf(!hasDb)("feed (database)", () => {
     await recomputeStandings(db, arena.id, season, NOW);
 
     await setDay(b.id, NOW, 900);
-    await recomputeStandings(db, arena.id, season, new Date(NOW.getTime() + 60_000));
+    await recomputeStandings(
+      db,
+      arena.id,
+      season,
+      new Date(NOW.getTime() + 60_000),
+    );
 
     return { arena, a, b, c };
   }
@@ -106,7 +113,9 @@ describe.skipIf(!hasDb)("feed (database)", () => {
       expect(feed!.entries[0]!.text).toBe(
         `${b.handle} usurped the Throne from ${a.handle}.`,
       );
-      expect(feed!.entries[1]!.text).toBe(`${a.handle} is the first Sovereign of Feed Test.`);
+      expect(feed!.entries[1]!.text).toBe(
+        `${a.handle} is the first Sovereign of Feed Test.`,
+      );
     });
 
     it("uses the pseudonym for an anonymous actor", async () => {
@@ -201,7 +210,11 @@ describe.skipIf(!hasDb)("feed (database)", () => {
   describe("longestReigns", () => {
     it("ranks by duration and marks the open reign", async () => {
       const { arena, a, b } = await withUsurping();
-      const records = await longestReigns(db, { arenaSlug: arena.slug, now: NOW });
+      const records = await longestReigns(db, {
+        arenaSlug: arena.slug,
+        now: NOW,
+        viewerId: a.id,
+      });
 
       expect(records).toHaveLength(2);
       // `a`'s reign is closed; `b`'s is open and still growing.
@@ -216,7 +229,11 @@ describe.skipIf(!hasDb)("feed (database)", () => {
 
     it("reports peak points, not current points", async () => {
       const { arena, a } = await withUsurping();
-      const records = await longestReigns(db, { arenaSlug: arena.slug, now: NOW });
+      const records = await longestReigns(db, {
+        arenaSlug: arena.slug,
+        now: NOW,
+        viewerId: a.id,
+      });
       const closed = records.find((r) => r.holder.handle === a.handle)!;
       expect(closed.peakPoints).toBe(500);
     });
@@ -225,7 +242,11 @@ describe.skipIf(!hasDb)("feed (database)", () => {
       const { arena, b } = await withUsurping();
       await setVisibility(db, b.id, arena.id, "hidden");
 
-      const records = await longestReigns(db, { arenaSlug: arena.slug, now: NOW });
+      const records = await longestReigns(db, {
+        arenaSlug: arena.slug,
+        now: NOW,
+        viewerId: b.id,
+      });
       expect(records.map((r) => r.holder.handle)).not.toContain(b.handle);
     });
 
@@ -233,7 +254,11 @@ describe.skipIf(!hasDb)("feed (database)", () => {
       const { arena, b } = await withUsurping();
       await setVisibility(db, b.id, arena.id, "anonymous");
 
-      const records = await longestReigns(db, { arenaSlug: arena.slug, now: NOW });
+      const records = await longestReigns(db, {
+        arenaSlug: arena.slug,
+        now: NOW,
+        viewerId: b.id,
+      });
       const theirs = records.find((r) => r.holder.pseudonym !== null)!;
 
       // The reign is the achievement being honoured; the name is optional.
@@ -245,7 +270,11 @@ describe.skipIf(!hasDb)("feed (database)", () => {
       const { arena, a, b } = await withUsurping();
       await setVisibility(db, b.id, arena.id, "hidden");
 
-      const records = await longestReigns(db, { arenaSlug: arena.slug, now: NOW });
+      const records = await longestReigns(db, {
+        arenaSlug: arena.slug,
+        now: NOW,
+        viewerId: a.id,
+      });
       const closed = records.find((r) => r.holder.handle === a.handle)!;
 
       expect(closed).toBeDefined();
@@ -254,21 +283,39 @@ describe.skipIf(!hasDb)("feed (database)", () => {
     });
 
     it("measures an open reign to now", async () => {
-      const { arena } = await withUsurping();
+      const { arena, a } = await withUsurping();
       const later = new Date(NOW.getTime() + 5 * 86_400_000);
-      const records = await longestReigns(db, { arenaSlug: arena.slug, now: later });
+      const records = await longestReigns(db, {
+        arenaSlug: arena.slug,
+        now: later,
+        viewerId: a.id,
+      });
       const open = records.find((r) => r.open)!;
       expect(open.days).toBeGreaterThanOrEqual(4);
     });
 
-    it("reads across arenas by default", async () => {
+    it("does not reveal private arenas to visitors or other clubs' members", async () => {
       const first = await withUsurping();
       const second = await withUsurping();
-      const records = await longestReigns(db, { now: NOW });
+      expect(
+        (await longestReigns(db, { now: NOW })).map((r) => r.arena.slug),
+      ).not.toContain(first.arena.slug);
+      const records = await longestReigns(db, {
+        now: NOW,
+        viewerId: first.a.id,
+      });
       const slugs = records.map((r) => r.arena.slug);
 
       expect(slugs).toContain(first.arena.slug);
-      expect(slugs).toContain(second.arena.slug);
+      expect(slugs).not.toContain(second.arena.slug);
+      await leaveArena(db, first.a.id, first.arena.id);
+      expect(
+        await longestReigns(db, {
+          now: NOW,
+          viewerId: first.a.id,
+          arenaSlug: first.arena.slug,
+        }),
+      ).toEqual([]);
     });
   });
 

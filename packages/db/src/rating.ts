@@ -56,7 +56,13 @@ import {
   usageEvents,
   users,
 } from "./schema.js";
-import { addDays, ensureCurrentSeason, seasonDays, startOfUtcDay, type Season } from "./seasons.js";
+import {
+  addDays,
+  ensureCurrentSeason,
+  seasonDays,
+  startOfUtcDay,
+  type Season,
+} from "./seasons.js";
 import { EVENT_CROWNED, EVENT_USURPED, titleForRank } from "./titles.js";
 import { pseudonymFor } from "./board.js";
 import { currentSovereign } from "./feed.js";
@@ -108,7 +114,14 @@ export async function dailyMetrics(
       commits: sql<string>`coalesce(sum(${usageEvents.commits}), 0)`,
     })
     .from(usageEvents)
-    .where(and(gte(usageEvents.hour, from), lt(usageEvents.hour, to), eq(usageEvents.historical, false)))
+    .where(
+      and(
+        gte(usageEvents.hour, from),
+        lt(usageEvents.hour, to),
+        eq(usageEvents.historical, false),
+        eq(usageEvents.sigOk, true),
+      ),
+    )
     .groupBy(usageEvents.userId, dayExpr);
 
   const n = (v: unknown) => Number(v ?? 0);
@@ -196,7 +209,9 @@ export async function recomputeDailyScores(
   const touchedUsers = new Set<string>();
   let daysWritten = 0;
 
-  for (const [dayKey, cohort] of [...byDay.entries()].sort((a, b) => a[0] - b[0])) {
+  for (const [dayKey, cohort] of [...byDay.entries()].sort(
+    (a, b) => a[0] - b[0],
+  )) {
     // Only persist the requested window; earlier days were read for streaks.
     if (dayKey < start.getTime()) continue;
     daysWritten++;
@@ -270,7 +285,7 @@ export interface RecomputeStandingsResult {
  * members syncing simultaneously will otherwise race and can produce two open
  * reigns."
  */
-function arenaLockKey(arenaId: string): bigint {
+export function arenaLockKey(arenaId: string): bigint {
   let hash = 0xcbf29ce484222325n;
   for (const byte of Buffer.from(arenaId, "utf8")) {
     hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
@@ -295,14 +310,23 @@ export async function recomputeStandings(
 ): Promise<RecomputeStandingsResult> {
   return db.transaction(async (tx) => {
     // `#6.1` — serialize per arena so two syncs cannot open two reigns.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${arenaLockKey(arenaId)})`);
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${arenaLockKey(arenaId)})`,
+    );
 
     const members = await tx
-      .select({ userId: arenaMembers.userId, handle: users.handle })
+      .select({
+        userId: arenaMembers.userId,
+        handle: users.handle,
+        reviewState: users.reviewState,
+      })
       .from(arenaMembers)
       .innerJoin(users, eq(users.id, arenaMembers.userId))
       .where(
-        and(eq(arenaMembers.arenaId, arenaId), sql`${arenaMembers.status} <> 'left'`),
+        and(
+          eq(arenaMembers.arenaId, arenaId),
+          sql`${arenaMembers.status} <> 'left'`,
+        ),
       );
 
     if (members.length === 0) {
@@ -333,10 +357,17 @@ export async function recomputeStandings(
         rank: standings.rank,
         status: standings.status,
         duelPts: standings.duelPts,
+        points: standings.points,
       })
       .from(standings)
       .where(eq(standings.seasonId, season.id));
     const prevRankByUser = new Map(previous.map((p) => [p.userId, p.rank]));
+    const previousPoints = new Map(previous.map((p) => [p.userId, p.points]));
+    const frozen = new Set(
+      members
+        .filter((m) => m.reviewState === "shadow_frozen")
+        .map((m) => m.userId),
+    );
     // `#5.2` — elimination is a one-way transition within a season. A
     // recompute must never resurrect someone a circle already cut, or the
     // mechanic would undo itself every ten minutes.
@@ -356,7 +387,8 @@ export async function recomputeStandings(
     const totals = members.map((member) => {
       let points = 0;
       for (const day of days) {
-        const dayPoints = byUserDay.get(`${member.userId}|${day.getTime()}`) ?? 0;
+        const dayPoints =
+          byUserDay.get(`${member.userId}|${day.getTime()}`) ?? 0;
         if (dayPoints > 0) {
           points += dayPoints;
         } else {
@@ -366,25 +398,37 @@ export async function recomputeStandings(
       }
       // Season points are the replayed total plus any net duel result.
       const duelPts = duelPtsByUser.get(member.userId) ?? 0;
-      return { ...member, points: Math.max(0, points + duelPts) };
+      return {
+        ...member,
+        points: frozen.has(member.userId)
+          ? (previousPoints.get(member.userId) ?? 0)
+          : Math.max(0, points + duelPts),
+      };
     });
 
     // Ties break on handle so a page boundary is stable across requests.
-    totals.sort((a, b) => b.points - a.points || a.handle.localeCompare(b.handle));
+    totals.sort(
+      (a, b) => b.points - a.points || a.handle.localeCompare(b.handle),
+    );
 
     // Titles are positional among members still in **title contention**
     // (`#5.2`), not among everyone: an eliminated member keeps their rating
     // position and stays on the board, but cannot be Sovereign.
     const eliminated = new Set(
-      [...statusByUser.entries()].filter(([, s]) => s === "eliminated").map(([id]) => id),
+      [...statusByUser.entries()]
+        .filter(([, s]) => s === "eliminated")
+        .map(([id]) => id),
     );
 
     let contentionSeen = 0;
-    const contenders = totals.filter((t) => !eliminated.has(t.userId)).length;
+    const contenders = totals.filter(
+      (t) => !eliminated.has(t.userId) && !frozen.has(t.userId),
+    ).length;
 
     const rows: StandingRow[] = totals.map((t, index) => {
       const isEliminated = eliminated.has(t.userId);
-      const contentionRank = isEliminated ? null : ++contentionSeen;
+      const contentionRank =
+        isEliminated || frozen.has(t.userId) ? null : ++contentionSeen;
 
       return {
         userId: t.userId,
@@ -394,7 +438,9 @@ export async function recomputeStandings(
         prevRank: prevRankByUser.get(t.userId) ?? null,
         eliminated: isEliminated,
         title:
-          contentionRank === null ? undefined : titleForRank(contentionRank, contenders),
+          contentionRank === null
+            ? undefined
+            : titleForRank(contentionRank, contenders),
       };
     });
 
@@ -425,7 +471,7 @@ export async function recomputeStandings(
 
     // The top member still in contention — an eliminated member cannot hold
     // the Throne even if their points are highest (`#5.2`).
-    const leader = rows.find((r) => !r.eliminated);
+    const leader = rows.find((r) => !r.eliminated && !frozen.has(r.userId));
     // Nobody with zero points holds a throne — an empty arena has no sovereign.
     const newLeaderId = leader && leader.points > 0 ? leader.userId : null;
 
@@ -470,10 +516,14 @@ export async function recomputeStandings(
       // Same holder — keep the peak honest for the Longest Reign board.
       await tx
         .update(reigns)
-        .set({ peakPoints: sql`greatest(${reigns.peakPoints}, ${leader!.points})` })
+        .set({
+          peakPoints: sql`greatest(${reigns.peakPoints}, ${leader!.points})`,
+        })
         .where(and(eq(reigns.arenaId, arenaId), isNull(reigns.endedAt)));
     }
 
+    // Delivered only after commit; listeners re-read through visibility checks.
+    await tx.execute(sql`select pg_notify('usurp_board_changed', ${arenaId})`);
     return {
       seasonId: season.id,
       members: rows.length,
@@ -496,18 +546,22 @@ export async function seasonStandings(
       rank: standings.rank,
       prevRank: standings.prevRank,
       status: standings.status,
+      reviewState: users.reviewState,
     })
     .from(standings)
     .innerJoin(users, eq(users.id, standings.userId))
     .where(eq(standings.seasonId, seasonId))
     .orderBy(asc(standings.rank));
 
-  const contenders = rows.filter((r) => r.status !== "eliminated").length;
+  const contenders = rows.filter(
+    (r) => r.status !== "eliminated" && r.reviewState !== "shadow_frozen",
+  ).length;
   let seen = 0;
 
   return rows.map((r) => {
     const isEliminated = r.status === "eliminated";
-    const contentionRank = isEliminated ? null : ++seen;
+    const contentionRank =
+      isEliminated || r.reviewState === "shadow_frozen" ? null : ++seen;
     return {
       userId: r.userId,
       handle: r.handle,
@@ -515,7 +569,10 @@ export async function seasonStandings(
       rank: r.rank ?? 0,
       prevRank: r.prevRank,
       eliminated: isEliminated,
-      title: contentionRank === null ? undefined : titleForRank(contentionRank, contenders),
+      title:
+        contentionRank === null
+          ? undefined
+          : titleForRank(contentionRank, contenders),
     };
   });
 }
@@ -540,6 +597,8 @@ export interface RatingBoard {
       pseudonym: string | null;
       /** Rank movement since the last recompute. Positive = climbed. */
       movement: number | null;
+      trustTier: "unverified" | "cli_signed" | "org_verified";
+      underReview: boolean;
     }
   >;
   /** Visible rows, after `#2` visibility filtering. */
@@ -584,13 +643,23 @@ export interface RatingBoard {
 export async function ratingBoard(
   db: Db,
   slug: string,
-  options: { limit?: number; offset?: number; now?: Date; viewerId?: string } = {},
+  options: {
+    limit?: number;
+    offset?: number;
+    now?: Date;
+    viewerId?: string;
+    trust?: "unverified" | "cli_signed" | "org_verified";
+  } = {},
 ): Promise<RatingBoard | undefined> {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
   const offset = Math.max(options.offset ?? 0, 0);
   const now = options.now ?? new Date();
 
-  const [arena] = await db.select().from(arenas).where(eq(arenas.slug, slug)).limit(1);
+  const [arena] = await db
+    .select()
+    .from(arenas)
+    .where(eq(arenas.slug, slug))
+    .limit(1);
   if (!arena) return undefined;
 
   const season = await ensureCurrentSeason(db, arena.id, now);
@@ -606,6 +675,9 @@ export async function ratingBoard(
       rank: standings.rank,
       prevRank: standings.prevRank,
       standingStatus: standings.status,
+      reviewState: users.reviewState,
+      manualOnly: sql<boolean>`exists(select 1 from usage_events ue where ue.user_id=${users.id} and not ue.sig_ok)
+        and not exists(select 1 from usage_events ue where ue.user_id=${users.id} and ue.sig_ok)`,
       visibility: arenaMembers.visibility,
       status: arenaMembers.status,
     })
@@ -613,7 +685,10 @@ export async function ratingBoard(
     .innerJoin(users, eq(users.id, standings.userId))
     .innerJoin(
       arenaMembers,
-      and(eq(arenaMembers.userId, standings.userId), eq(arenaMembers.arenaId, arena.id)),
+      and(
+        eq(arenaMembers.userId, standings.userId),
+        eq(arenaMembers.arenaId, arena.id),
+      ),
     )
     .where(eq(standings.seasonId, season.id))
     .orderBy(asc(standings.rank));
@@ -628,19 +703,30 @@ export async function ratingBoard(
     .select({ n: sql<number>`count(*)::int` })
     .from(arenaMembers)
     .where(
-      and(eq(arenaMembers.arenaId, arena.id), sql`${arenaMembers.status} <> 'left'`),
+      and(
+        eq(arenaMembers.arenaId, arena.id),
+        sql`${arenaMembers.status} <> 'left'`,
+      ),
     );
 
   // `#5.2` — titles go by position among members still in contention, so an
   // eliminated member keeps their place on the board without being Sovereign.
-  const contenders = visible.filter((r) => r.standingStatus !== "eliminated").length;
+  const contenders = visible.filter(
+    (r) =>
+      r.standingStatus !== "eliminated" &&
+      r.reviewState !== "shadow_frozen" &&
+      !r.manualOnly,
+  ).length;
   let contentionSeen = 0;
 
   const mapped = visible.map((r) => {
     const anonymous = r.visibility === "anonymous";
     const rank = r.rank ?? 0;
     const eliminated = r.standingStatus === "eliminated";
-    const contentionRank = eliminated ? null : ++contentionSeen;
+    const contentionRank =
+      eliminated || r.reviewState === "shadow_frozen" || r.manualOnly
+        ? null
+        : ++contentionSeen;
 
     return {
       userId: r.userId,
@@ -653,17 +739,30 @@ export async function ratingBoard(
       prevRank: r.prevRank,
       // Positive = moved up the board.
       movement: r.prevRank === null ? null : r.prevRank - rank,
+      trustTier: r.manualOnly
+        ? ("unverified" as const)
+        : ("cli_signed" as const),
+      underReview: r.reviewState === "shadow_frozen",
       eliminated,
       title:
-        contentionRank === null ? undefined : titleForRank(contentionRank, contenders),
+        contentionRank === null
+          ? undefined
+          : titleForRank(contentionRank, contenders),
     };
   });
 
   return {
     arena: { slug: arena.slug, name: arena.name, type: arena.type },
-    season: { idx: season.idx, startsAt: season.startsAt, endsAt: season.endsAt },
-    rows: mapped.slice(offset, offset + limit),
-    total: mapped.length,
+    season: {
+      idx: season.idx,
+      startsAt: season.startsAt,
+      endsAt: season.endsAt,
+    },
+    rows: mapped
+      .filter((r) => !options.trust || r.trustTier === options.trust)
+      .slice(offset, offset + limit),
+    total: mapped.filter((r) => !options.trust || r.trustTier === options.trust)
+      .length,
     memberCount: Math.max(Number(memberTally?.n ?? 0), active.length),
     throne: sovereign
       ? {

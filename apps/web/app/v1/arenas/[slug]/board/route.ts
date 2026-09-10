@@ -10,12 +10,15 @@
 import { z } from "zod";
 import { burnBoard, getDb, ratingBoard } from "@usurp/db";
 import { NextResponse } from "next/server";
+import { currentUser } from "../../../../../lib/session";
+import { canViewArena } from "../../../../../lib/arena-access";
 
 const querySchema = z.object({
   window: z.enum(["day", "week", "month", "all"]).default("week"),
   metric: z.enum(["burn", "rating"]).default("burn"),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
+  trust: z.enum(["unverified", "cli_signed", "org_verified"]).optional(),
 });
 
 export const dynamic = "force-dynamic";
@@ -25,6 +28,8 @@ export async function GET(
   context: { params: Promise<{ slug: string }> },
 ): Promise<NextResponse> {
   const { slug } = await context.params;
+  if (!(await canViewArena(slug, (await currentUser())?.id)))
+    return NextResponse.json({ error: "arena_not_found" }, { status: 404 });
   const url = new URL(request.url);
 
   const parsed = querySchema.safeParse(Object.fromEntries(url.searchParams));
@@ -41,12 +46,12 @@ export async function GET(
     );
   }
 
-  const { window, metric, limit, offset } = parsed.data;
+  const { window, metric, limit, offset, trust } = parsed.data;
 
   if (metric === "rating") {
     // Live as of M2: the `#4.4` gate passed, so the rating board is real.
     try {
-      const board = await ratingBoard(getDb(), slug, { limit, offset });
+      const board = await ratingBoard(getDb(), slug, { limit, offset, trust });
       if (!board) {
         return NextResponse.json({ error: "arena_not_found" }, { status: 404 });
       }
@@ -70,7 +75,7 @@ export async function GET(
 
   let board;
   try {
-    board = await burnBoard(getDb(), slug, { window, limit, offset });
+    board = await burnBoard(getDb(), slug, { window, limit, offset, trust });
   } catch (err) {
     console.error("board query failed", err);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });

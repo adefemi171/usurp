@@ -6,6 +6,8 @@ dist
 **/dist
 .next
 **/.next
+.next-qa
+**/.next-qa
 *.tsbuildinfo
 **/*.tsbuildinfo
 

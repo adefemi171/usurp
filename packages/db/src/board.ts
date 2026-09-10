@@ -23,7 +23,7 @@ export interface BurnRow {
   rank: number;
   /** Null when the member competes anonymously. */
   handle: string | null;
-  displayName: string | null
+  displayName: string | null;
   avatarUrl: string | null;
   /** Stable pseudonym for an `anonymous` member — `#2`. */
   pseudonym: string | null;
@@ -38,7 +38,10 @@ export interface BurnRow {
   flagged: boolean;
 }
 
-export function windowStart(window: BoardWindow, now = new Date()): Date | undefined {
+export function windowStart(
+  window: BoardWindow,
+  now = new Date(),
+): Date | undefined {
   const day = 86_400_000;
   switch (window) {
     case "day":
@@ -59,12 +62,36 @@ export function windowStart(window: BoardWindow, now = new Date()): Date | undef
  * which would make it reversible for anyone who can see the member list.
  */
 const ADJECTIVES = [
-  "Silent", "Restless", "Gilded", "Iron", "Hollow", "Crimson", "Vagrant",
-  "Patient", "Errant", "Obsidian", "Feral", "Wintering", "Lucid", "Ardent",
+  "Silent",
+  "Restless",
+  "Gilded",
+  "Iron",
+  "Hollow",
+  "Crimson",
+  "Vagrant",
+  "Patient",
+  "Errant",
+  "Obsidian",
+  "Feral",
+  "Wintering",
+  "Lucid",
+  "Ardent",
 ];
 const NOUNS = [
-  "Falcon", "Warden", "Cipher", "Lantern", "Magpie", "Sentinel", "Harrier",
-  "Ledger", "Anvil", "Quarry", "Beacon", "Corsair", "Thistle", "Kestrel",
+  "Falcon",
+  "Warden",
+  "Cipher",
+  "Lantern",
+  "Magpie",
+  "Sentinel",
+  "Harrier",
+  "Ledger",
+  "Anvil",
+  "Quarry",
+  "Beacon",
+  "Corsair",
+  "Thistle",
+  "Kestrel",
 ];
 
 export function pseudonymFor(userId: string): string {
@@ -78,6 +105,7 @@ export function pseudonymFor(userId: string): string {
 }
 
 export interface BurnBoardOptions {
+  trust?: BurnRow["trustTier"];
   window?: BoardWindow;
   /** Reveals the invite code when the viewer owns the arena. */
   viewerId?: string;
@@ -124,7 +152,11 @@ export async function burnBoard(
   const offset = Math.max(options.offset ?? 0, 0);
   const since = windowStart(window, options.now);
 
-  const [arena] = await db.select().from(arenas).where(eq(arenas.slug, slug)).limit(1);
+  const [arena] = await db
+    .select()
+    .from(arenas)
+    .where(eq(arenas.slug, slug))
+    .limit(1);
   if (!arena) return undefined;
 
   /**
@@ -155,15 +187,27 @@ export async function burnBoard(
     .select({ n: sql<number>`count(*)::int` })
     .from(arenaMembers)
     .where(
-      and(eq(arenaMembers.arenaId, arena.id), sql`${arenaMembers.status} <> 'left'`),
+      and(
+        eq(arenaMembers.arenaId, arena.id),
+        sql`${arenaMembers.status} <> 'left'`,
+      ),
     );
 
   const memberCount = Number(memberTally?.n ?? 0);
   const inviteCode =
-    options.viewerId && arena.ownerUserId === options.viewerId ? arena.inviteCode : null;
+    options.viewerId && arena.ownerUserId === options.viewerId
+      ? arena.inviteCode
+      : null;
 
   if (visible.length === 0) {
-    return { arena: pick(arena), window, rows: [], total: 0, memberCount, inviteCode };
+    return {
+      arena: pick(arena),
+      window,
+      rows: [],
+      total: 0,
+      memberCount,
+      inviteCode,
+    };
   }
 
   const memberIds = visible.map((m) => m.userId);
@@ -183,6 +227,7 @@ export async function burnBoard(
       // A user is flagged if any of their rows in the window carries a gate
       // flag. `#3.4` shows them, flagged, rather than hiding the evidence.
       flagged: sql<boolean>`bool_or(jsonb_array_length(${usageEvents.flags}) > 0)`,
+      signed: sql<boolean>`bool_or(${usageEvents.sigOk})`,
     })
     .from(usageEvents)
     .where(and(...conditions))
@@ -210,25 +255,41 @@ export async function burnBoard(
         costMicros: Number(t?.cost ?? 0),
         // M0 registers every device as `cli_signed`; the column is the source
         // of truth once manual upload and org verification land.
-        trustTier: "cli_signed" as const,
+        trustTier: (t && !t.signed
+          ? "unverified"
+          : "cli_signed") as BurnRow["trustTier"],
         flagged: Boolean(t?.flagged) || member.reviewState === "shadow_frozen",
       };
     })
-    .filter((row) => options.includeFlagged === false ? !row.flagged : true)
+    .filter((row) => (options.includeFlagged === false ? !row.flagged : true))
+    .filter((row) => !options.trust || row.trustTier === options.trust)
     // Ties break on handle so a page boundary is stable across requests.
     .sort(
       (a, b) =>
         b.effectiveTokens - a.effectiveTokens ||
-        (a.handle ?? a.pseudonym ?? "").localeCompare(b.handle ?? b.pseudonym ?? ""),
+        (a.handle ?? a.pseudonym ?? "").localeCompare(
+          b.handle ?? b.pseudonym ?? "",
+        ),
     );
 
   const rows: BurnRow[] = ranked
     .map(({ userId: _userId, ...rest }, i) => ({ rank: i + 1, ...rest }))
     .slice(offset, offset + limit);
 
-  return { arena: pick(arena), window, rows, total: ranked.length, memberCount, inviteCode };
+  return {
+    arena: pick(arena),
+    window,
+    rows,
+    total: ranked.length,
+    memberCount,
+    inviteCode,
+  };
 }
 
-function pick(arena: { slug: string; name: string; type: "global" | "org" | "club" }) {
+function pick(arena: {
+  slug: string;
+  name: string;
+  type: "global" | "org" | "club";
+}) {
   return { slug: arena.slug, name: arena.name, type: arena.type };
 }

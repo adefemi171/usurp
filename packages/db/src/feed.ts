@@ -73,7 +73,12 @@ export function resolveActor(
 }
 
 /** Sentence for an event, in the active voice. */
-function renderEntry(type: string, actor: FeedActor | null, target: FeedActor | null, arenaName: string): string {
+function renderEntry(
+  type: string,
+  actor: FeedActor | null,
+  target: FeedActor | null,
+  arenaName: string,
+): string {
   const who = actor?.display ?? "Someone";
 
   switch (type) {
@@ -106,7 +111,9 @@ export interface ArenaFeed {
 export async function arenaVisibility(
   db: Db,
   arenaId: string,
-): Promise<Map<string, { handle: string; visibility: string; status: string }>> {
+): Promise<
+  Map<string, { handle: string; visibility: string; status: string }>
+> {
   const rows = await db
     .select({
       userId: arenaMembers.userId,
@@ -128,7 +135,11 @@ export async function arenaFeed(
 ): Promise<ArenaFeed | undefined> {
   const limit = Math.min(Math.max(options.limit ?? 30, 1), 100);
 
-  const [arena] = await db.select().from(arenas).where(eq(arenas.slug, slug)).limit(1);
+  const [arena] = await db
+    .select()
+    .from(arenas)
+    .where(eq(arenas.slug, slug))
+    .limit(1);
   if (!arena) return undefined;
 
   const members = await arenaVisibility(db, arena.id);
@@ -207,12 +218,24 @@ export interface ReignRecord {
  */
 export async function longestReigns(
   db: Db,
-  options: { limit?: number; now?: Date; arenaSlug?: string } = {},
+  options: {
+    limit?: number;
+    now?: Date;
+    arenaSlug?: string;
+    viewerId?: string;
+  } = {},
 ): Promise<ReignRecord[]> {
   const limit = Math.min(Math.max(options.limit ?? 25, 1), 100);
   const now = options.now ?? new Date();
 
-  const conditions = options.arenaSlug ? [eq(arenas.slug, options.arenaSlug)] : [];
+  const conditions = options.arenaSlug
+    ? [eq(arenas.slug, options.arenaSlug)]
+    : [];
+  conditions.push(sql`(${arenas.type} = 'global' or (${options.viewerId ?? null}::uuid is not null and
+    (${arenas.ownerUserId} = ${options.viewerId ?? null}::uuid or exists (
+      select 1 from arena_members access_member where access_member.arena_id = ${arenas.id}
+      and access_member.user_id = ${options.viewerId ?? null}::uuid and access_member.status <> 'left'
+    ))))`);
 
   /**
    * Reign length in seconds, measuring an open reign to `now`.
@@ -249,7 +272,10 @@ export async function longestReigns(
 
   // Visibility is per arena, so fetch membership for the arenas in play.
   const arenaIds = [...new Set(rows.map((r) => r.arenaId))];
-  const members = new Map<string, Map<string, { handle: string; visibility: string; status: string }>>();
+  const members = new Map<
+    string,
+    Map<string, { handle: string; visibility: string; status: string }>
+  >();
 
   for (const arenaId of arenaIds) {
     const memberRows = await db
@@ -298,7 +324,9 @@ export async function longestReigns(
 export async function currentSovereign(
   db: Db,
   arenaId: string,
-): Promise<{ userId: string; startedAt: Date; peakPoints: number } | undefined> {
+): Promise<
+  { userId: string; startedAt: Date; peakPoints: number } | undefined
+> {
   const [open] = await db
     .select({
       userId: reigns.userId,

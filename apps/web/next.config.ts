@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
+  // Keep isolated browser QA from taking the user's active dev-server lock.
+  distDir: process.env.USURP_QA === "1" ? ".next-qa" : ".next",
   // Deliberately NOT `output: "standalone"`. The same image also runs the
   // migrate and enroll jobs (`docker-compose.yml`), so it needs the real
   // workspace and `node_modules` anyway — a standalone bundle would be a

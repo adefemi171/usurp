@@ -23,7 +23,14 @@
 
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
-import { arenaMembers, arenas, usageEvents, users, devices, usageBridgeSnapshots } from "./schema.js";
+import {
+  arenaMembers,
+  arenas,
+  usageEvents,
+  users,
+  devices,
+  usageBridgeSnapshots,
+} from "./schema.js";
 import { mergeBridgeSeries, selectedBridgeSnapshots } from "./bridge.js";
 import { windowStart, type BoardWindow } from "./board.js";
 
@@ -113,9 +120,17 @@ export interface Profile {
   analyticsSeries: UsageSeriesPoint[];
   /** Exact selected bridge exports, without native additions. */
   bridgeSeries: UsageSeriesPoint[];
-  bridgeImports: Array<{ importedAt: string; pricingVersion: string; agents: string[] }>;
+  bridgeImports: Array<{
+    importedAt: string;
+    pricingVersion: string;
+    agents: string[];
+  }>;
   /** Arenas this user is public in — the only ones safe to name. */
-  arenas: Array<{ slug: string; name: string; type: "global" | "org" | "club" }>;
+  arenas: Array<{
+    slug: string;
+    name: string;
+    type: "global" | "org" | "club";
+  }>;
   /** Distinct devices contributing, count only — never ids or keys. */
   deviceCount: number;
   /** Imported archive buckets in the selected analytics window. */
@@ -150,8 +165,11 @@ export async function userProfile(
   const window = options.window ?? "week";
   let since = windowStart(window, options.now);
   if (options.dailyAnalytics && since) {
-    const today = new Date(options.now ?? new Date()); today.setUTCHours(0, 0, 0, 0);
-    since = new Date(+today - (window === "day" ? 0 : window === "week" ? 6 : 29) * 86400_000);
+    const today = new Date(options.now ?? new Date());
+    today.setUTCHours(0, 0, 0, 0);
+    since = new Date(
+      +today - (window === "day" ? 0 : window === "week" ? 6 : 29) * 86400_000,
+    );
   }
 
   // Case-insensitive, matching the `lower(handle)` unique index — otherwise
@@ -174,10 +192,15 @@ export async function userProfile(
         eq(arenaMembers.userId, user.id),
         eq(arenaMembers.visibility, "public"),
         sql`${arenaMembers.status} <> 'left'`,
+        sql`(${arenas.type} = 'global' or ${user.id}::text = ${options.viewerId ?? ""}
+          or ${arenas.ownerUserId}::text = ${options.viewerId ?? ""}
+          or exists(select 1 from arena_members viewer_member where viewer_member.arena_id=${arenas.id}
+            and viewer_member.user_id::text=${options.viewerId ?? ""} and viewer_member.status <> 'left'))`,
       ),
     );
 
-  if (visibleArenas.length === 0 && options.viewerId !== user.id) return undefined;
+  if (visibleArenas.length === 0 && options.viewerId !== user.id)
+    return undefined;
 
   const scope = since
     ? and(eq(usageEvents.userId, user.id), gte(usageEvents.hour, since))
@@ -284,45 +307,79 @@ export async function userProfile(
 
   // The chart needs the joint distribution. Separate by-day and by-model
   // totals cannot tell us which model generated a particular day's activity.
-  const series = await db.select({
-    deviceId: usageEvents.deviceId,
-    day: dayExpr,
-    agent: usageEvents.agent,
-    model: usageEvents.model,
-    inputTokens: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)`,
-    outputTokens: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)`,
-    cacheWriteTokens: sql<number>`coalesce(sum(${usageEvents.cacheWriteTokens}), 0)`,
-    cacheReadTokens: sql<number>`coalesce(sum(${usageEvents.cacheReadTokens}), 0)`,
-    effectiveTokens: effective,
-    calls: sql<number>`coalesce(sum(${usageEvents.calls}), 0)`,
-    costMicros: sql<number>`coalesce(sum(${usageEvents.costMicros}), 0)`,
-    sessionsStarted: sql<number>`coalesce(sum(${usageEvents.sessionsStarted}), 0)`,
-    sessionsCompleted: sql<number>`coalesce(sum(${usageEvents.sessionsCompleted}), 0)`,
-    sessionsAbandoned: sql<number>`coalesce(sum(${usageEvents.sessionsAbandoned}), 0)`,
-    editsApplied: sql<number>`coalesce(sum(${usageEvents.editsApplied}), 0)`,
-    editsReverted: sql<number>`coalesce(sum(${usageEvents.editsReverted}), 0)`,
-    commits: sql<number>`coalesce(sum(${usageEvents.commits}), 0)`,
-    historicalBuckets: sql<number>`count(*) filter (where ${usageEvents.historical})::int`,
-    unpricedBuckets: sql<number>`count(*) filter (where ${usageEvents.flags} @> '["unknown_model"]'::jsonb)::int`,
-  }).from(usageEvents).where(scope)
-    .groupBy(dayExpr, usageEvents.deviceId, usageEvents.agent, usageEvents.model)
+  const series = await db
+    .select({
+      deviceId: usageEvents.deviceId,
+      day: dayExpr,
+      agent: usageEvents.agent,
+      model: usageEvents.model,
+      inputTokens: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)`,
+      outputTokens: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)`,
+      cacheWriteTokens: sql<number>`coalesce(sum(${usageEvents.cacheWriteTokens}), 0)`,
+      cacheReadTokens: sql<number>`coalesce(sum(${usageEvents.cacheReadTokens}), 0)`,
+      effectiveTokens: effective,
+      calls: sql<number>`coalesce(sum(${usageEvents.calls}), 0)`,
+      costMicros: sql<number>`coalesce(sum(${usageEvents.costMicros}), 0)`,
+      sessionsStarted: sql<number>`coalesce(sum(${usageEvents.sessionsStarted}), 0)`,
+      sessionsCompleted: sql<number>`coalesce(sum(${usageEvents.sessionsCompleted}), 0)`,
+      sessionsAbandoned: sql<number>`coalesce(sum(${usageEvents.sessionsAbandoned}), 0)`,
+      editsApplied: sql<number>`coalesce(sum(${usageEvents.editsApplied}), 0)`,
+      editsReverted: sql<number>`coalesce(sum(${usageEvents.editsReverted}), 0)`,
+      commits: sql<number>`coalesce(sum(${usageEvents.commits}), 0)`,
+      historicalBuckets: sql<number>`count(*) filter (where ${usageEvents.historical})::int`,
+      unpricedBuckets: sql<number>`count(*) filter (where ${usageEvents.flags} @> '["unknown_model"]'::jsonb)::int`,
+    })
+    .from(usageEvents)
+    .where(scope)
+    .groupBy(
+      dayExpr,
+      usageEvents.deviceId,
+      usageEvents.agent,
+      usageEvents.model,
+    )
     .orderBy(dayExpr, usageEvents.agent, usageEvents.model);
 
-  const snapshots = options.dailyAnalytics ? await db.select({ deviceId: devices.id, snapshot: usageBridgeSnapshots.snapshot, importedAt: usageBridgeSnapshots.importedAt })
-    .from(usageBridgeSnapshots).innerJoin(devices, eq(devices.id, usageBridgeSnapshots.deviceId)).where(eq(devices.userId, user.id)) : [];
-  const normalized = series.map(r => ({ ...r,
-    ...Object.fromEntries(Object.entries(r).filter(([k]) => !["day", "agent", "model", "deviceId"].includes(k)).map(([k, v]) => [k, n(v)])),
+  const snapshots = options.dailyAnalytics
+    ? await db
+        .select({
+          deviceId: devices.id,
+          snapshot: usageBridgeSnapshots.snapshot,
+          importedAt: usageBridgeSnapshots.importedAt,
+        })
+        .from(usageBridgeSnapshots)
+        .innerJoin(devices, eq(devices.id, usageBridgeSnapshots.deviceId))
+        .where(eq(devices.userId, user.id))
+    : [];
+  const normalized = series.map((r) => ({
+    ...r,
+    ...Object.fromEntries(
+      Object.entries(r)
+        .filter(([k]) => !["day", "agent", "model", "deviceId"].includes(k))
+        .map(([k, v]) => [k, n(v)]),
+    ),
   })) as Array<UsageSeriesPoint & { deviceId: string }>;
-  const analyticsSeries = mergeBridgeSeries(normalized, snapshots, since?.toISOString().slice(0, 10));
+  const analyticsSeries = mergeBridgeSeries(
+    normalized,
+    snapshots,
+    since?.toISOString().slice(0, 10),
+  );
   return {
     handle: user.handle,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
     joinedAt: user.createdAt,
     window,
-    bridgeImports: selectedBridgeSnapshots(snapshots).map(s => ({ importedAt: s.importedAt.toISOString(), pricingVersion: s.snapshot.pricingVersion, agents: s.snapshot.agents })),
+    bridgeImports: selectedBridgeSnapshots(snapshots).map((s) => ({
+      importedAt: s.importedAt.toISOString(),
+      pricingVersion: s.snapshot.pricingVersion,
+      agents: s.snapshot.agents,
+    })),
     analyticsSeries,
-    bridgeSeries: mergeBridgeSeries([], snapshots, since?.toISOString().slice(0, 10)),
+    bridgeSeries: mergeBridgeSeries(
+      [],
+      snapshots,
+      since?.toISOString().slice(0, 10),
+    ),
     usageSeries: mergeBridgeSeries(normalized, []),
     totals: {
       effectiveTokens: n(t?.effective),
@@ -380,8 +437,16 @@ export async function userProfile(
       costMicros: n(r.cost),
     })),
     arenas: visibleArenas,
-    deviceCount: new Set([...normalized.map(r => r.deviceId), ...snapshots.filter(s =>
-      s.snapshot.rows.some(r => !since || r.day >= since.toISOString().slice(0, 10))).map(s => s.deviceId)]).size,
+    deviceCount: new Set([
+      ...normalized.map((r) => r.deviceId),
+      ...snapshots
+        .filter((s) =>
+          s.snapshot.rows.some(
+            (r) => !since || r.day >= since.toISOString().slice(0, 10),
+          ),
+        )
+        .map((s) => s.deviceId),
+    ]).size,
     historicalBuckets: n(t?.historicalBuckets),
     flagged: Boolean(t?.flagged) || user.reviewState === "shadow_frozen",
     // M0 registers every device as `cli_signed`; the column is authoritative
@@ -402,16 +467,23 @@ export async function userProfile(
  * `cache_read / (input + cache_read)` pins to ~0.9999 and says nothing.
  */
 export function derivedSignals(totals: ProfileTotals) {
-  const { cacheReadTokens, cacheWriteTokens, sessionsStarted, sessionsCompleted } = totals;
+  const {
+    cacheReadTokens,
+    cacheWriteTokens,
+    sessionsStarted,
+    sessionsCompleted,
+  } = totals;
 
   const cacheDenominator = cacheReadTokens + cacheWriteTokens;
   const sessionDenominator = sessionsStarted;
 
   return {
     /** Reuse vs re-caching — where the money actually goes. */
-    cacheReuse: cacheDenominator > 0 ? cacheReadTokens / cacheDenominator : null,
+    cacheReuse:
+      cacheDenominator > 0 ? cacheReadTokens / cacheDenominator : null,
     /** `#4.2` completion: punishes abandoned thrash loops. */
-    completion: sessionDenominator > 0 ? sessionsCompleted / sessionDenominator : null,
+    completion:
+      sessionDenominator > 0 ? sessionsCompleted / sessionDenominator : null,
     /** `#4.2` yield: commits per million effective tokens. */
     yieldPerMTok:
       totals.effectiveTokens > 0

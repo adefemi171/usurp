@@ -171,31 +171,20 @@ export async function joinByInviteCode(
 
     if (!arena) return { ok: false as const, failure: "invalid_code" as const };
 
-    // `#2` — at most one org.
+    // Organization admission requires DNS proof, a verified work email and
+    // explicit aggregate consent through joinOrg. Legacy codes cannot bypass it.
     if (arena.type === "org") {
-      const [existingOrg] = await tx
-        .select({ arenaId: arenaMembers.arenaId })
-        .from(arenaMembers)
-        .innerJoin(arenas, eq(arenas.id, arenaMembers.arenaId))
-        .where(
-          and(
-            eq(arenaMembers.userId, userId),
-            eq(arenas.type, "org"),
-            sql`${arenaMembers.status} <> 'left'`,
-          ),
-        )
-        .limit(1);
-
-      if (existingOrg && existingOrg.arenaId !== arena.id) {
-        return { ok: false as const, failure: "already_in_org" as const };
-      }
+      return { ok: false as const, failure: "invalid_code" as const };
     }
 
     const [existing] = await tx
       .select()
       .from(arenaMembers)
       .where(
-        and(eq(arenaMembers.arenaId, arena.id), eq(arenaMembers.userId, userId)),
+        and(
+          eq(arenaMembers.arenaId, arena.id),
+          eq(arenaMembers.userId, userId),
+        ),
       )
       .limit(1);
 
@@ -209,7 +198,10 @@ export async function joinByInviteCode(
       .select({ n: count() })
       .from(arenaMembers)
       .where(
-        and(eq(arenaMembers.arenaId, arena.id), sql`${arenaMembers.status} <> 'left'`),
+        and(
+          eq(arenaMembers.arenaId, arena.id),
+          sql`${arenaMembers.status} <> 'left'`,
+        ),
       );
 
     const cap = arena.maxMembers;
@@ -229,7 +221,10 @@ export async function joinByInviteCode(
           joinedAt: new Date(),
         })
         .where(
-          and(eq(arenaMembers.arenaId, arena.id), eq(arenaMembers.userId, userId)),
+          and(
+            eq(arenaMembers.arenaId, arena.id),
+            eq(arenaMembers.userId, userId),
+          ),
         )
         .returning();
       return { ok: true as const, arena, member: member!, rejoined: true };
@@ -256,11 +251,15 @@ export async function setVisibility(
   userId: string,
   arenaId: string,
   visibility: "public" | "anonymous" | "hidden",
-): Promise<{ ok: true; member: ArenaMember } | { ok: false; failure: VisibilityFailure }> {
+): Promise<
+  { ok: true; member: ArenaMember } | { ok: false; failure: VisibilityFailure }
+> {
   const [member] = await db
     .update(arenaMembers)
     .set({ visibility })
-    .where(and(eq(arenaMembers.arenaId, arenaId), eq(arenaMembers.userId, userId)))
+    .where(
+      and(eq(arenaMembers.arenaId, arenaId), eq(arenaMembers.userId, userId)),
+    )
     .returning();
 
   if (!member) return { ok: false, failure: "not_a_member" };
@@ -282,7 +281,9 @@ export async function leaveArena(
   const [member] = await db
     .update(arenaMembers)
     .set({ status: "left", visibility: "hidden" })
-    .where(and(eq(arenaMembers.arenaId, arenaId), eq(arenaMembers.userId, userId)))
+    .where(
+      and(eq(arenaMembers.arenaId, arenaId), eq(arenaMembers.userId, userId)),
+    )
     .returning();
 
   return member ? { ok: true } : { ok: false, failure: "not_a_member" };
@@ -299,7 +300,10 @@ export interface Membership {
 }
 
 /** Every arena a user belongs to. Powers `GET /v1/me`. */
-export async function membershipsFor(db: Db, userId: string): Promise<Membership[]> {
+export async function membershipsFor(
+  db: Db,
+  userId: string,
+): Promise<Membership[]> {
   const rows = await db
     .select({
       arena: arenas,
@@ -313,7 +317,12 @@ export async function membershipsFor(db: Db, userId: string): Promise<Membership
     })
     .from(arenaMembers)
     .innerJoin(arenas, eq(arenas.id, arenaMembers.arenaId))
-    .where(and(eq(arenaMembers.userId, userId), sql`${arenaMembers.status} <> 'left'`));
+    .where(
+      and(
+        eq(arenaMembers.userId, userId),
+        sql`${arenaMembers.status} <> 'left'`,
+      ),
+    );
 
   return rows.map((row) => ({
     arena: row.arena,

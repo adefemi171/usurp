@@ -26,6 +26,7 @@
     "migrate": "node --env-file-if-exists=../../.env dist/migrate.js",
     "enroll": "node --env-file-if-exists=../../.env dist/enroll.js",
     "recompute": "node --env-file-if-exists=../../.env dist/recompute.js",
+    "review": "node --env-file-if-exists=../../.env dist/review-cli.js",
     "worker": "node --env-file-if-exists=../../.env dist/worker.js"
   },
   "dependencies": {

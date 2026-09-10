@@ -9,7 +9,16 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDb, getDb } from "./client.js";
-import { arenaMembers, arenas, dailyScores, devices, duels, standings, usageEvents, users } from "./schema.js";
+import {
+  arenaMembers,
+  arenas,
+  dailyScores,
+  devices,
+  duels,
+  standings,
+  usageEvents,
+  users,
+} from "./schema.js";
 import {
   MAX_CONCURRENT_DUELS,
   acceptDuel,
@@ -92,7 +101,9 @@ describe.skipIf(!hasDb)("duels (database)", () => {
     const [row] = await db
       .select({ points: standings.points, duelPts: standings.duelPts })
       .from(standings)
-      .where(and(eq(standings.seasonId, seasonId), eq(standings.userId, userId)));
+      .where(
+        and(eq(standings.seasonId, seasonId), eq(standings.userId, userId)),
+      );
     return row!;
   };
 
@@ -111,7 +122,11 @@ describe.skipIf(!hasDb)("duels (database)", () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.duel).toMatchObject({ state: "proposed", wagerPts: 50, metric: "points" });
+        expect(result.duel).toMatchObject({
+          state: "proposed",
+          wagerPts: 50,
+          metric: "points",
+        });
       }
     });
 
@@ -278,7 +293,48 @@ describe.skipIf(!hasDb)("duels (database)", () => {
   });
 
   describe("accept / decline", () => {
-    async function proposal() {
+    it("serializes concurrent proposals and reserves points across open challenges", async () => {
+      const { arena: a, members } = await arena(100, 5);
+      const results = await Promise.all(
+        members.slice(1).map((opponent) =>
+          proposeDuel(db, {
+            arenaId: a.id,
+            challengerId: members[0]!.id,
+            opponentId: opponent.id,
+            metric: "points",
+            wagerPts: 60,
+            window: "24h",
+            now: NOW,
+          }),
+        ),
+      );
+      expect(results.filter((r) => r.ok)).toHaveLength(1);
+      expect(
+        results
+          .filter((r) => !r.ok)
+          .every((r) => !r.ok && r.failure === "insufficient_points"),
+      ).toBe(true);
+    });
+
+    it("enforces the two-duel cap under concurrent requests", async () => {
+      const { arena: a, members } = await arena(500, 5);
+      const results = await Promise.all(
+        members.slice(1).map((opponent) =>
+          proposeDuel(db, {
+            arenaId: a.id,
+            challengerId: members[0]!.id,
+            opponentId: opponent.id,
+            metric: "points",
+            wagerPts: 10,
+            window: "24h",
+            now: NOW,
+          }),
+        ),
+      );
+      expect(results.filter((r) => r.ok)).toHaveLength(2);
+    });
+
+    async function proposal(window: "24h" | "7d" = "24h") {
       const { arena: a, season, members } = await arena();
       const result = await proposeDuel(db, {
         arenaId: a.id,
@@ -286,7 +342,7 @@ describe.skipIf(!hasDb)("duels (database)", () => {
         opponentId: members[1]!.id,
         metric: "points",
         wagerPts: 50,
-        window: "24h",
+        window,
         now: NOW,
       });
       if (!result.ok) throw new Error(result.failure);
@@ -305,31 +361,77 @@ describe.skipIf(!hasDb)("duels (database)", () => {
       expect(accepted.ok).toBe(true);
       if (accepted.ok) {
         // A slow reply must not eat the contested window.
-        expect(accepted.duel.windowStart.getTime()).toBe(later.getTime());
-        expect(accepted.duel.windowEnd.getTime()).toBe(later.getTime() + 24 * 3_600_000);
+        const nextDay = addDays(startOfUtcDay(later), 1);
+        expect(accepted.duel.windowStart.getTime()).toBe(nextDay.getTime());
+        expect(accepted.duel.windowEnd.getTime()).toBe(
+          nextDay.getTime() + 24 * 3_600_000,
+        );
       }
     });
 
     it("honours the 7d window", async () => {
-      const { members, duel } = await proposal();
+      const { members, duel } = await proposal("7d");
       const accepted = await acceptDuel(db, members[1]!.id, duel.id, {
-        window: "7d",
+        window: "24h", // Caller cannot change the agreed duration.
         now: NOW,
       });
       if (!accepted.ok) throw new Error(accepted.failure);
       expect(
-        (accepted.duel.windowEnd.getTime() - accepted.duel.windowStart.getTime()) / 3_600_000,
+        (accepted.duel.windowEnd.getTime() -
+          accepted.duel.windowStart.getTime()) /
+          3_600_000,
       ).toBe(168);
+    });
+
+    it("rechecks both balances and membership on acceptance", async () => {
+      const { arena: a, season, members, duel } = await proposal();
+      await db
+        .update(standings)
+        .set({ points: 1 })
+        .where(
+          and(
+            eq(standings.seasonId, season.id),
+            eq(standings.userId, members[1]!.id),
+          ),
+        );
+      expect(
+        await acceptDuel(db, members[1]!.id, duel.id, { now: NOW }),
+      ).toMatchObject({ ok: false, failure: "insufficient_points" });
+      await db
+        .update(standings)
+        .set({ points: 500 })
+        .where(
+          and(
+            eq(standings.seasonId, season.id),
+            eq(standings.userId, members[1]!.id),
+          ),
+        );
+      await db
+        .update(arenaMembers)
+        .set({ status: "left" })
+        .where(
+          and(
+            eq(arenaMembers.arenaId, a.id),
+            eq(arenaMembers.userId, members[0]!.id),
+          ),
+        );
+      expect(
+        await acceptDuel(db, members[1]!.id, duel.id, { now: NOW }),
+      ).toMatchObject({ ok: false, failure: "not_a_member" });
     });
 
     it("lets only the challenged party accept", async () => {
       const { members, duel } = await proposal();
       // The challenger accepting their own challenge would be a free wager.
-      expect(await acceptDuel(db, members[0]!.id, duel.id, { now: NOW })).toEqual({
+      expect(
+        await acceptDuel(db, members[0]!.id, duel.id, { now: NOW }),
+      ).toEqual({
         ok: false,
         failure: "not_yours",
       });
-      expect(await acceptDuel(db, members[2]!.id, duel.id, { now: NOW })).toEqual({
+      expect(
+        await acceptDuel(db, members[2]!.id, duel.id, { now: NOW }),
+      ).toEqual({
         ok: false,
         failure: "not_yours",
       });
@@ -338,7 +440,9 @@ describe.skipIf(!hasDb)("duels (database)", () => {
     it("cannot be accepted twice", async () => {
       const { members, duel } = await proposal();
       await acceptDuel(db, members[1]!.id, duel.id, { now: NOW });
-      expect(await acceptDuel(db, members[1]!.id, duel.id, { now: NOW })).toEqual({
+      expect(
+        await acceptDuel(db, members[1]!.id, duel.id, { now: NOW }),
+      ).toEqual({
         ok: false,
         failure: "not_pending",
       });
@@ -348,7 +452,9 @@ describe.skipIf(!hasDb)("duels (database)", () => {
       const { members, duel } = await proposal();
       const tooLate = new Date(NOW.getTime() + 72 * 3_600_000);
 
-      expect(await acceptDuel(db, members[1]!.id, duel.id, { now: tooLate })).toEqual({
+      expect(
+        await acceptDuel(db, members[1]!.id, duel.id, { now: tooLate }),
+      ).toEqual({
         ok: false,
         failure: "expired",
       });
@@ -359,16 +465,30 @@ describe.skipIf(!hasDb)("duels (database)", () => {
 
     it("lets either party back out of a proposal", async () => {
       const first = await proposal();
-      expect((await declineDuel(db, first.members[1]!.id, first.duel.id, { now: NOW })).ok).toBe(true);
+      expect(
+        (
+          await declineDuel(db, first.members[1]!.id, first.duel.id, {
+            now: NOW,
+          })
+        ).ok,
+      ).toBe(true);
 
       const second = await proposal();
       // The challenger withdrawing is the same transition.
-      expect((await declineDuel(db, second.members[0]!.id, second.duel.id, { now: NOW })).ok).toBe(true);
+      expect(
+        (
+          await declineDuel(db, second.members[0]!.id, second.duel.id, {
+            now: NOW,
+          })
+        ).ok,
+      ).toBe(true);
     });
 
     it("refuses a decline from an uninvolved member", async () => {
       const { members, duel } = await proposal();
-      expect(await declineDuel(db, members[2]!.id, duel.id, { now: NOW })).toEqual({
+      expect(
+        await declineDuel(db, members[2]!.id, duel.id, { now: NOW }),
+      ).toEqual({
         ok: false,
         failure: "not_yours",
       });
@@ -393,10 +513,13 @@ describe.skipIf(!hasDb)("duels (database)", () => {
         now: NOW,
       });
       if (!proposed.ok) throw new Error(proposed.failure);
-      await acceptDuel(db, members[1]!.id, proposed.duel.id, { window: "24h", now: NOW });
+      await acceptDuel(db, members[1]!.id, proposed.duel.id, {
+        window: "24h",
+        now: NOW,
+      });
 
       // Contested day sits inside the window.
-      const day = addDays(startOfUtcDay(NOW), 0);
+      const day = addDays(startOfUtcDay(NOW), 1);
       for (const [member, pts] of [
         [members[0]!, challengerPoints],
         [members[1]!, opponentPoints],
@@ -420,7 +543,7 @@ describe.skipIf(!hasDb)("duels (database)", () => {
       return { arena: a, season, members, duel: proposed.duel };
     }
 
-    const after = new Date(NOW.getTime() + 25 * 3_600_000);
+    const after = new Date(NOW.getTime() + 49 * 3_600_000);
 
     it("pays the winner and charges the loser", async () => {
       const { season, members, duel } = await closedDuel(900, 100, 50);
@@ -499,7 +622,10 @@ describe.skipIf(!hasDb)("duels (database)", () => {
 
       await settleDuels(db, { now: new Date(NOW.getTime() + 72 * 3_600_000) });
 
-      const [row] = await db.select().from(duels).where(eq(duels.id, proposed.duel.id));
+      const [row] = await db
+        .select()
+        .from(duels)
+        .where(eq(duels.id, proposed.duel.id));
       expect(row!.state).toBe("expired");
       expect((await pointsOf(season.id, members[0]!.id)).duelPts).toBe(0);
       void a;
@@ -519,24 +645,90 @@ describe.skipIf(!hasDb)("duels (database)", () => {
   });
 
   describe("duelScores", () => {
-    it.each(["commits", "edits"] as const)("excludes archive imports from %s duels", async (metric) => {
+    it("excludes daily scores before the window and at its exclusive end", async () => {
       const { arena: a, members } = await arena();
       const proposed = await proposeDuel(db, {
-        arenaId: a.id, challengerId: members[0]!.id, opponentId: members[1]!.id,
-        metric, wagerPts: 10, window: "24h", now: NOW,
+        arenaId: a.id,
+        challengerId: members[0]!.id,
+        opponentId: members[1]!.id,
+        metric: "points",
+        wagerPts: 10,
+        window: "24h",
+        now: NOW,
       });
-      if (!proposed.ok) throw new Error(proposed.failure);
-      const accepted = await acceptDuel(db, members[1]!.id, proposed.duel.id, { window: "24h", now: NOW });
-      if (!accepted.ok) throw new Error(accepted.failure);
-      const deviceId = `archive_${members[0]!.id}`;
-      await db.insert(devices).values({ id: deviceId, userId: members[0]!.id, publicKey: deviceId });
-      await db.insert(usageEvents).values([false, true].map(historical => ({
-        deviceId, userId: members[0]!.id, agent: "test", model: "test", historical,
-        hour: NOW, commits: historical ? 999 : 3, editsApplied: historical ? 999 : 7,
-        dedupeKey: `${deviceId}_${historical}`, sigOk: true,
-      })));
-      expect(await duelScores(db, accepted.duel)).toEqual({ challenger: metric === "commits" ? 3 : 7, opponent: 0 });
+      if (!proposed.ok) throw Error(proposed.failure);
+      const accepted = await acceptDuel(db, members[1]!.id, proposed.duel.id, {
+        now: NOW,
+      });
+      if (!accepted.ok) throw Error(accepted.failure);
+      await db
+        .insert(dailyScores)
+        .values(
+          [accepted.duel.windowStart, accepted.duel.windowEnd].map(
+            (day, i) => ({
+              userId: members[0]!.id,
+              day,
+              volumePts: 0,
+              efficiencyMultBp: 10000,
+              streakMultBp: 10000,
+              points: i === 0 ? 17 : 999,
+            }),
+          ),
+        );
+      expect(await duelScores(db, accepted.duel)).toEqual({
+        challenger: 17,
+        opponent: 0,
+      });
     });
+    it.each(["commits", "edits"] as const)(
+      "excludes archive imports from %s duels",
+      async (metric) => {
+        const { arena: a, members } = await arena();
+        const proposed = await proposeDuel(db, {
+          arenaId: a.id,
+          challengerId: members[0]!.id,
+          opponentId: members[1]!.id,
+          metric,
+          wagerPts: 10,
+          window: "24h",
+          now: NOW,
+        });
+        if (!proposed.ok) throw new Error(proposed.failure);
+        const accepted = await acceptDuel(
+          db,
+          members[1]!.id,
+          proposed.duel.id,
+          { window: "24h", now: NOW },
+        );
+        if (!accepted.ok) throw new Error(accepted.failure);
+        const deviceId = `archive_${members[0]!.id}`;
+        await db
+          .insert(devices)
+          .values({
+            id: deviceId,
+            userId: members[0]!.id,
+            publicKey: deviceId,
+          });
+        await db.insert(usageEvents).values(
+          [false, true].map((historical) => ({
+            deviceId,
+            userId: members[0]!.id,
+            agent: "test",
+            model: "test",
+            historical,
+            hour: NOW,
+            commits: historical ? 999 : 3,
+            editsApplied: historical ? 999 : 7,
+            dedupeKey: `${deviceId}_${historical}`,
+            sigOk: true,
+          })),
+        );
+        expect(await duelScores(db, accepted.duel)).toEqual({
+          challenger: metric === "commits" ? 3 : 7,
+          opponent: 0,
+        });
+      },
+    );
 
     it("counts commits inside the window only", async () => {
       const { arena: a, members } = await arena();

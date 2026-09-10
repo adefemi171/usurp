@@ -25,8 +25,10 @@
  */
 
 import { randomBytes, createHmac } from "node:crypto";
-import { and, desc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
+import { postWebhook, publicAddress } from "./webhook-http.js";
+import { isIP } from "node:net";
 import {
   arenas,
   events,
@@ -77,7 +79,11 @@ export const THROTTLED: readonly string[] = [EVENT_USURPED, EVENT_CROWNED];
 
 // ── Channel management ─────────────────────────────────────────────────────
 
-export type AddChannelFailure = "invalid_target" | "duplicate";
+export type AddChannelFailure =
+  | "invalid_target"
+  | "duplicate"
+  | "email_not_verified"
+  | "email_unavailable";
 
 export interface AddedChannel {
   channel: Channel;
@@ -100,8 +106,8 @@ export type AddChannelResult =
  * A server-side POST to a user-supplied URL is an SSRF primitive, and
  * `http://169.254.169.254/` is the textbook target, so private and loopback
  * addresses are refused. HTTPS is required outside development. This is not
- * proof against DNS rebinding — an egress proxy is the real fix, noted in
- * ROADMAP — but it closes the obvious hole.
+ * sufficient on its own: the transport additionally validates and pins the
+ * actual DNS results used by the connection to prevent rebinding.
  */
 export function validateTarget(kind: ChannelKind, target: string): boolean {
   if (target.length > 2048) return false;
@@ -120,11 +126,21 @@ export function validateTarget(kind: ChannelKind, target: string): boolean {
   // Loopback over plain HTTP is how you test a webhook on your own machine, so
   // it is allowed in development and refused in production.
   const allowInsecure = process.env.NODE_ENV !== "production";
-  if (url.protocol !== "https:" && !(allowInsecure && url.protocol === "http:")) {
+  if (
+    url.protocol !== "https:" &&
+    !(allowInsecure && url.protocol === "http:")
+  ) {
     return false;
   }
 
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (url.username || url.password) return false;
+  if (
+    process.env.NODE_ENV === "production" &&
+    isIP(host) &&
+    !publicAddress(host)
+  )
+    return false;
 
   /**
    * Link-local is refused in *every* environment, not just production.
@@ -135,7 +151,11 @@ export function validateTarget(kind: ChannelKind, target: string): boolean {
    * fetch credentials on someone's behalf. `.internal` is the same idea by
    * name rather than by number.
    */
-  if (/^169\.254\./.test(host) || /^fe[89ab][0-9a-f]:/.test(host) || host.endsWith(".internal")) {
+  if (
+    /^169\.254\./.test(host) ||
+    /^fe[89ab][0-9a-f]:/.test(host) ||
+    host.endsWith(".internal")
+  ) {
     return false;
   }
 
@@ -167,10 +187,19 @@ export async function addChannel(
   if (!validateTarget(kind, trimmed)) {
     return { ok: false, failure: "invalid_target" };
   }
+  if (kind === "email") {
+    if (!emailNotificationsEnabled())
+      return { ok: false, failure: "email_unavailable" };
+    const verified = await db.execute(
+      sql`select 1 from identities where user_id = ${userId} and provider = 'email' and provider_uid = ${trimmed.toLowerCase()} limit 1`,
+    );
+    if (!verified.length) return { ok: false, failure: "email_not_verified" };
+  }
 
   // Only webhooks get a signing secret; there is nothing to verify an email
   // with, and Slack authenticates by the secrecy of the hook URL itself.
-  const secret = kind === "webhook" ? randomBytes(24).toString("base64url") : null;
+  const secret =
+    kind === "webhook" ? randomBytes(24).toString("base64url") : null;
 
   try {
     const [channel] = await db
@@ -186,10 +215,19 @@ export async function addChannel(
   }
 }
 
-export async function removeChannel(db: Db, userId: string, channelId: string): Promise<boolean> {
+export async function removeChannel(
+  db: Db,
+  userId: string,
+  channelId: string,
+): Promise<boolean> {
   const deleted = await db
     .delete(notificationChannels)
-    .where(and(eq(notificationChannels.id, channelId), eq(notificationChannels.userId, userId)))
+    .where(
+      and(
+        eq(notificationChannels.id, channelId),
+        eq(notificationChannels.userId, userId),
+      ),
+    )
     .returning({ id: notificationChannels.id });
   return deleted.length > 0;
 }
@@ -203,7 +241,12 @@ export async function setChannelEnabled(
   const updated = await db
     .update(notificationChannels)
     .set({ enabled })
-    .where(and(eq(notificationChannels.id, channelId), eq(notificationChannels.userId, userId)))
+    .where(
+      and(
+        eq(notificationChannels.id, channelId),
+        eq(notificationChannels.userId, userId),
+      ),
+    )
     .returning({ id: notificationChannels.id });
   return updated.length > 0;
 }
@@ -225,7 +268,12 @@ export async function revealChannelSecret(
   const [row] = await db
     .select({ secret: notificationChannels.secret })
     .from(notificationChannels)
-    .where(and(eq(notificationChannels.id, channelId), eq(notificationChannels.userId, userId)))
+    .where(
+      and(
+        eq(notificationChannels.id, channelId),
+        eq(notificationChannels.userId, userId),
+      ),
+    )
     .limit(1);
   return row?.secret ?? null;
 }
@@ -242,7 +290,10 @@ export interface ChannelView {
   createdAt: Date;
 }
 
-export async function channelsFor(db: Db, userId: string): Promise<ChannelView[]> {
+export async function channelsFor(
+  db: Db,
+  userId: string,
+): Promise<ChannelView[]> {
   const rows = await db
     .select()
     .from(notificationChannels)
@@ -284,8 +335,14 @@ export interface NotificationPayload {
  * the signature over a fresh one will not match. The same reasoning as
  * `#3.3`'s per-device `seq`, applied outbound.
  */
-export function signBody(secret: string, body: string, timestamp: number): string {
-  return createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+export function signBody(
+  secret: string,
+  body: string,
+  timestamp: number,
+): string {
+  return createHmac("sha256", secret)
+    .update(`${timestamp}.${body}`)
+    .digest("hex");
 }
 
 export interface SendResult {
@@ -300,18 +357,48 @@ export interface Transport {
 /**
  * The default transport.
  *
- * Webhook and Slack are real. Email is a stub that fails *loudly*: returning a
- * fake success would let someone configure email, see no error in settings, and
- * never be told anything. `last_error` makes the gap visible where it matters.
+ * Webhooks pin validated DNS results to the connection. Email uses the
+ * deployment's Resend credentials and accepts only linked, verified addresses.
  */
 export const httpTransport: Transport = {
   async send(channel, payload) {
     if (channel.kind === "email") {
-      return { ok: false, error: "email delivery is not configured on this deployment" };
+      if (!emailNotificationsEnabled())
+        return {
+          ok: false,
+          error: "email delivery is not configured on this deployment",
+        };
+      try {
+        const response = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          redirect: "error",
+          signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+          headers: {
+            authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            from: process.env.AUTH_EMAIL_FROM,
+            to: [channel.target],
+            subject: "Your Usurp arena update",
+            text: `${payload.text}\n\n${payload.url ?? ""}\n\nManage or disable these notifications in Usurp Settings.`,
+          }),
+        });
+        return response.ok
+          ? { ok: true }
+          : {
+              ok: false,
+              error: `email provider returned HTTP ${response.status}`,
+            };
+      } catch {
+        return { ok: false, error: "email delivery failed" };
+      }
     }
 
     const body =
-      channel.kind === "slack" ? JSON.stringify({ text: payload.text }) : JSON.stringify(payload);
+      channel.kind === "slack"
+        ? JSON.stringify({ text: payload.text })
+        : JSON.stringify(payload);
 
     const timestamp = Math.floor(Date.now() / 1000);
     const headers: Record<string, string> = {
@@ -321,27 +408,32 @@ export const httpTransport: Transport = {
 
     if (channel.secret) {
       headers["x-usurp-timestamp"] = String(timestamp);
-      headers["x-usurp-signature"] = `sha256=${signBody(channel.secret, body, timestamp)}`;
+      headers["x-usurp-signature"] =
+        `sha256=${signBody(channel.secret, body, timestamp)}`;
     }
 
     try {
-      const response = await fetch(channel.target, {
-        method: "POST",
+      if (!validateTarget(channel.kind, channel.target))
+        return { ok: false, error: "invalid delivery target" };
+      const status = await postWebhook(
+        channel.target,
         headers,
         body,
-        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
-        // Never follow a redirect: a 302 to an internal address would walk
-        // straight past the checks `validateTarget` ran at configuration time.
-        redirect: "manual",
-      });
-
-      if (response.status >= 200 && response.status < 300) return { ok: true };
-      return { ok: false, error: `receiver returned HTTP ${response.status}` };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : "send failed" };
+        SEND_TIMEOUT_MS,
+      );
+      if (status >= 200 && status < 300) return { ok: true };
+      return { ok: false, error: `receiver returned HTTP ${status}` };
+    } catch {
+      return { ok: false, error: "webhook delivery failed" };
     }
   },
 };
+
+export function emailNotificationsEnabled() {
+  return Boolean(
+    process.env.RESEND_API_KEY?.trim() && process.env.AUTH_EMAIL_FROM?.trim(),
+  );
+}
 
 // ── Dispatch ───────────────────────────────────────────────────────────────
 
@@ -426,7 +518,10 @@ export async function dispatchNotifications(
     }
 
     let arena: { slug: string; name: string } | null = null;
-    let members = new Map<string, { handle: string; visibility: string; status: string }>();
+    let members = new Map<
+      string,
+      { handle: string; visibility: string; status: string }
+    >();
 
     if (event.arenaId) {
       if (!arenaCache.has(event.arenaId)) {
@@ -436,19 +531,34 @@ export async function dispatchNotifications(
           .where(eq(arenas.id, event.arenaId))
           .limit(1);
         arenaCache.set(event.arenaId, row ?? null);
-        visibilityCache.set(event.arenaId, await arenaVisibility(db, event.arenaId));
+        visibilityCache.set(
+          event.arenaId,
+          await arenaVisibility(db, event.arenaId),
+        );
       }
       arena = arenaCache.get(event.arenaId) ?? null;
       members = visibilityCache.get(event.arenaId) ?? members;
     }
 
     for (const channel of channels) {
-      const deliveryId = await claimDelivery(db, event.id, channel.id, now, "pending");
+      const deliveryId = await claimDelivery(
+        db,
+        event.id,
+        channel.id,
+        now,
+        "pending",
+      );
       // Null means a row already exists — this event has been attempted for
       // this channel. That single index is what makes dispatch idempotent.
       if (!deliveryId) continue;
 
-      const payload = buildPayload(event, channel.userId, members, handles, arena);
+      const payload = buildPayload(
+        event,
+        channel.userId,
+        members,
+        handles,
+        arena,
+      );
       const result = await transport.send(channel, payload);
       await recordResult(db, deliveryId, channel.id, result, now);
       if (result.ok) summary.sent++;
@@ -459,9 +569,16 @@ export async function dispatchNotifications(
   return summary;
 }
 
-async function handleMap(db: Db, rows: EventRow[]): Promise<Map<string, string>> {
+async function handleMap(
+  db: Db,
+  rows: EventRow[],
+): Promise<Map<string, string>> {
   const ids = [
-    ...new Set(rows.flatMap((e) => [e.actorId, e.targetId]).filter((v): v is string => !!v)),
+    ...new Set(
+      rows
+        .flatMap((e) => [e.actorId, e.targetId])
+        .filter((v): v is string => !!v),
+    ),
   ];
   if (ids.length === 0) return new Map();
 
@@ -480,7 +597,12 @@ async function recipientChannels(db: Db, event: EventRow): Promise<Channel[]> {
   return db
     .select()
     .from(notificationChannels)
-    .where(and(inArray(notificationChannels.userId, ids), eq(notificationChannels.enabled, true)));
+    .where(
+      and(
+        inArray(notificationChannels.userId, ids),
+        eq(notificationChannels.enabled, true),
+      ),
+    );
 }
 
 /** True when a throne alert already went out for this arena within the hour. */
@@ -494,7 +616,10 @@ async function throttled(db: Db, arenaId: string, now: Date): Promise<boolean> {
         eq(events.arenaId, arenaId),
         inArray(events.type, [...THROTTLED]),
         eq(notificationDeliveries.status, "sent"),
-        gte(notificationDeliveries.lastAttemptAt, new Date(now.getTime() - THRONE_COOLDOWN_MS)),
+        gte(
+          notificationDeliveries.lastAttemptAt,
+          new Date(now.getTime() - THRONE_COOLDOWN_MS),
+        ),
       ),
     )
     .limit(1);
@@ -576,7 +701,10 @@ export function buildPayload(
     // feed, the notification is not dropped — the recipient is a party to the
     // event and has a right to know it happened — but the other name is
     // withheld, which is the guarantee `#2` actually makes.
-    const resolved: FeedActor | null | undefined = resolveActor(userId, members);
+    const resolved: FeedActor | null | undefined = resolveActor(
+      userId,
+      members,
+    );
     if (resolved === undefined) return null;
     return resolved?.display ?? null;
   };
@@ -628,7 +756,10 @@ export function buildPayload(
  * that promise, and once an event is older than `DISPATCH_LOOKBACK_MS` its
  * rows can no longer suppress or de-duplicate anything.
  */
-export async function pruneDeliveries(db: Db, now = new Date()): Promise<number> {
+export async function pruneDeliveries(
+  db: Db,
+  now = new Date(),
+): Promise<number> {
   const cutoff = new Date(now.getTime() - DELIVERY_RETENTION_MS);
   const deleted = await db
     .delete(notificationDeliveries)

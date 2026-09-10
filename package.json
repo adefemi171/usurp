@@ -30,6 +30,7 @@
     "simulate": "npm -w @usurp/scoring run simulate --",
     "cohort": "npm -w @usurp/scoring run cohort",
     "recompute": "npm -w @usurp/db run recompute --",
+    "review": "npm -w @usurp/db run review --",
     "worker": "npm -w @usurp/db run worker --"
   },
   "devDependencies": {

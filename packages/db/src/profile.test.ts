@@ -18,8 +18,12 @@ import {
 } from "@usurp/protocol";
 import { closeDb, getDb } from "./client.js";
 import { ingest } from "./ingest.js";
-import { issueEnrollment, redeemEnrollment, upsertUserByHandle } from "./enrollment.js";
-import { arenaMembers, users } from "./schema.js";
+import {
+  issueEnrollment,
+  redeemEnrollment,
+  upsertUserByHandle,
+} from "./enrollment.js";
+import { arenaMembers, arenas, users } from "./schema.js";
 import { joinGlobalArena } from "./seed.js";
 import { derivedSignals, userProfile } from "./profile.js";
 
@@ -62,7 +66,8 @@ describe.skipIf(!hasDb)("userProfile", () => {
           cacheReadTokens: base.cache_read_tokens,
         }),
       dedupe_key:
-        overrides.dedupe_key ?? dedupeKey(deviceId, base.hour, base.agent, base.model),
+        overrides.dedupe_key ??
+        dedupeKey(deviceId, base.hour, base.agent, base.model),
     };
   }
 
@@ -81,7 +86,8 @@ describe.skipIf(!hasDb)("userProfile", () => {
       ),
       { now: NOW },
     );
-    if (!result.ok) throw new Error(`ingest failed: ${JSON.stringify(result.rejected)}`);
+    if (!result.ok)
+      throw new Error(`ingest failed: ${JSON.stringify(result.rejected)}`);
     return result;
   }
 
@@ -107,18 +113,64 @@ describe.skipIf(!hasDb)("userProfile", () => {
   });
 
   const setVisibility = (visibility: "public" | "anonymous" | "hidden") =>
-    db.update(arenaMembers).set({ visibility }).where(eq(arenaMembers.userId, userId));
+    db
+      .update(arenaMembers)
+      .set({ visibility })
+      .where(eq(arenaMembers.userId, userId));
 
   describe("the visibility gate", () => {
-    it.each(["anonymous", "hidden"] as const)("allows only the owner of a %s profile", async (visibility) => {
-      await submit([bucket()], 1);
-      await setVisibility(visibility);
-      const own = await userProfile(db, handle, { window: "all", now: NOW, viewerId: userId });
-      expect(own?.totals.calls).toBe(5);
-      expect(own?.arenas).toEqual([]);
-      expect(await userProfile(db, handle, { viewerId: "not-the-owner" })).toBeUndefined();
-      expect(await userProfile(db, handle)).toBeUndefined();
+    it("club-only visibility does not publish a profile or private arena names globally", async () => {
+      await db.delete(arenaMembers).where(eq(arenaMembers.userId, userId));
+      const [club] = await db
+        .insert(arenas)
+        .values({
+          type: "club",
+          name: "Private profile club",
+          slug: `private-${userId}`,
+        })
+        .returning();
+      const friend = await upsertUserByHandle(
+        db,
+        `friend_${Math.random().toString(36).slice(2, 10)}`,
+      );
+      try {
+        await db.insert(arenaMembers).values([
+          { arenaId: club!.id, userId, visibility: "public" },
+          { arenaId: club!.id, userId: friend.id, visibility: "hidden" },
+        ]);
+        expect(await userProfile(db, handle)).toBeUndefined();
+        expect(
+          (await userProfile(db, handle, { viewerId: friend.id }))?.arenas.map(
+            (a) => a.slug,
+          ),
+        ).toContain(club!.slug);
+        await joinGlobalArena(db, userId);
+        expect(
+          (await userProfile(db, handle))?.arenas.map((a) => a.slug),
+        ).toEqual(["global"]);
+      } finally {
+        await db.delete(arenas).where(eq(arenas.id, club!.id));
+        await db.delete(users).where(eq(users.id, friend.id));
+      }
     });
+    it.each(["anonymous", "hidden"] as const)(
+      "allows only the owner of a %s profile",
+      async (visibility) => {
+        await submit([bucket()], 1);
+        await setVisibility(visibility);
+        const own = await userProfile(db, handle, {
+          window: "all",
+          now: NOW,
+          viewerId: userId,
+        });
+        expect(own?.totals.calls).toBe(5);
+        expect(own?.arenas).toEqual([]);
+        expect(
+          await userProfile(db, handle, { viewerId: "not-the-owner" }),
+        ).toBeUndefined();
+        expect(await userProfile(db, handle)).toBeUndefined();
+      },
+    );
 
     it("lets a new account see its own empty dashboard without joining an arena", async () => {
       await db.delete(arenaMembers).where(eq(arenaMembers.userId, userId));
@@ -127,25 +179,34 @@ describe.skipIf(!hasDb)("userProfile", () => {
       expect(own?.usageSeries).toEqual([]);
       expect(own?.arenas).toEqual([]);
       expect(await userProfile(db, handle)).toBeUndefined();
-      expect(await userProfile(db, handle, { viewerId: "not-the-owner" })).toBeUndefined();
+      expect(
+        await userProfile(db, handle, { viewerId: "not-the-owner" }),
+      ).toBeUndefined();
     });
 
     it("serves a public member", async () => {
       await submit([bucket()], 1);
-      const profile = await userProfile(db, handle, { window: "all", now: NOW });
+      const profile = await userProfile(db, handle, {
+        window: "all",
+        now: NOW,
+      });
       expect(profile?.handle).toBe(handle);
     });
 
     it("refuses an anonymous member, so the pseudonym stays unlinkable", async () => {
       await submit([bucket()], 1);
       await setVisibility("anonymous");
-      expect(await userProfile(db, handle, { window: "all", now: NOW })).toBeUndefined();
+      expect(
+        await userProfile(db, handle, { window: "all", now: NOW }),
+      ).toBeUndefined();
     });
 
     it("refuses a hidden member", async () => {
       await submit([bucket()], 1);
       await setVisibility("hidden");
-      expect(await userProfile(db, handle, { window: "all", now: NOW })).toBeUndefined();
+      expect(
+        await userProfile(db, handle, { window: "all", now: NOW }),
+      ).toBeUndefined();
     });
 
     it("refuses a member who has left", async () => {
@@ -154,13 +215,20 @@ describe.skipIf(!hasDb)("userProfile", () => {
         .update(arenaMembers)
         .set({ status: "left" })
         .where(eq(arenaMembers.userId, userId));
-      expect(await userProfile(db, handle, { window: "all", now: NOW })).toBeUndefined();
+      expect(
+        await userProfile(db, handle, { window: "all", now: NOW }),
+      ).toBeUndefined();
     });
 
     it("refuses a user with no arena membership at all", async () => {
-      const orphan = await upsertUserByHandle(db, `orphan_${Math.random().toString(36).slice(2, 8)}`);
+      const orphan = await upsertUserByHandle(
+        db,
+        `orphan_${Math.random().toString(36).slice(2, 8)}`,
+      );
       try {
-        expect(await userProfile(db, orphan.handle, { window: "all", now: NOW })).toBeUndefined();
+        expect(
+          await userProfile(db, orphan.handle, { window: "all", now: NOW }),
+        ).toBeUndefined();
       } finally {
         await db.delete(users).where(eq(users.id, orphan.id));
       }
@@ -178,7 +246,10 @@ describe.skipIf(!hasDb)("userProfile", () => {
 
     it("names only the arenas the member is public in", async () => {
       await submit([bucket()], 1);
-      const profile = await userProfile(db, handle, { window: "all", now: NOW });
+      const profile = await userProfile(db, handle, {
+        window: "all",
+        now: NOW,
+      });
       expect(profile?.arenas.map((a) => a.slug)).toEqual(["global"]);
     });
   });
@@ -196,23 +267,53 @@ describe.skipIf(!hasDb)("userProfile", () => {
 
   describe("aggregation", () => {
     it("provides the real daily model/agent distribution and preserves totals", async () => {
-      await submit([bucket(), bucket({ agent: "cursor" }), bucket({ hour: "2026-09-07T12:00:00Z" })], 1);
+      await submit(
+        [
+          bucket(),
+          bucket({ agent: "cursor" }),
+          bucket({ hour: "2026-09-07T12:00:00Z" }),
+        ],
+        1,
+      );
       const p = (await userProfile(db, handle, { window: "all", now: NOW }))!;
       expect(p.usageSeries).toHaveLength(3);
-      expect(p.usageSeries.map(r => `${r.day}:${r.agent}`)).toEqual([
-        "2026-09-07:claude-code", "2026-09-08:claude-code", "2026-09-08:cursor",
+      expect(p.usageSeries.map((r) => `${r.day}:${r.agent}`)).toEqual([
+        "2026-09-07:claude-code",
+        "2026-09-08:claude-code",
+        "2026-09-08:cursor",
       ]);
-      expect(p.usageSeries.reduce((s, r) => s + r.effectiveTokens, 0)).toBe(p.totals.effectiveTokens);
-      expect(p.usageSeries.reduce((s, r) => s + r.costMicros, 0)).toBe(p.totals.costMicros);
+      expect(p.usageSeries.reduce((s, r) => s + r.effectiveTokens, 0)).toBe(
+        p.totals.effectiveTokens,
+      );
+      expect(p.usageSeries.reduce((s, r) => s + r.costMicros, 0)).toBe(
+        p.totals.costMicros,
+      );
       expect(p.usageSeries[0]?.inputTokens).toBe(100);
       expect(p.usageSeries[0]?.unpricedBuckets).toBe(0);
     });
 
     it("labels unpriced and historical series while obeying the date window", async () => {
-      await submit([bucket({ hour: "2026-05-05T13:00:00Z", historical: true, model: "unknown-model", cost_micros: 0 })], 1);
+      await submit(
+        [
+          bucket({
+            hour: "2026-05-05T13:00:00Z",
+            historical: true,
+            model: "unknown-model",
+            cost_micros: 0,
+          }),
+        ],
+        1,
+      );
       const p = (await userProfile(db, handle, { window: "all", now: NOW }))!;
-      expect(p.usageSeries[0]).toMatchObject({ historicalBuckets: 1, unpricedBuckets: 1, costMicros: 0 });
-      expect((await userProfile(db, handle, { window: "week", now: NOW }))?.usageSeries).toEqual([]);
+      expect(p.usageSeries[0]).toMatchObject({
+        historicalBuckets: 1,
+        unpricedBuckets: 1,
+        costMicros: 0,
+      });
+      expect(
+        (await userProfile(db, handle, { window: "week", now: NOW }))
+          ?.usageSeries,
+      ).toEqual([]);
     });
 
     it("totals the counters", async () => {
@@ -241,14 +342,22 @@ describe.skipIf(!hasDb)("userProfile", () => {
           bucket({
             model: "claude-sonnet-5",
             output_tokens: 5_000,
-            dedupe_key: dedupeKey(deviceId, "2026-09-08T13:00:00Z", "claude-code", "claude-sonnet-5"),
+            dedupe_key: dedupeKey(
+              deviceId,
+              "2026-09-08T13:00:00Z",
+              "claude-code",
+              "claude-sonnet-5",
+            ),
           }),
         ],
         1,
       );
 
       const p = await userProfile(db, handle, { window: "all", now: NOW });
-      expect(p?.byModel.map((m) => m.model)).toEqual(["claude-sonnet-5", "claude-opus-5"]);
+      expect(p?.byModel.map((m) => m.model)).toEqual([
+        "claude-sonnet-5",
+        "claude-opus-5",
+      ]);
       expect(p?.byModel[0]!.effectiveTokens).toBe(5_400);
     });
 
@@ -258,17 +367,21 @@ describe.skipIf(!hasDb)("userProfile", () => {
           bucket(),
           bucket({
             agent: "cursor",
-            dedupe_key: dedupeKey(deviceId, "2026-09-08T13:00:00Z", "cursor", "claude-opus-5"),
+            dedupe_key: dedupeKey(
+              deviceId,
+              "2026-09-08T13:00:00Z",
+              "cursor",
+              "claude-opus-5",
+            ),
           }),
         ],
         1,
       );
 
       const p = await userProfile(db, handle, { window: "all", now: NOW });
-      expect(p?.byModelAgent.map((entry) => `${entry.agent}:${entry.model}`).sort()).toEqual([
-        "claude-code:claude-opus-5",
-        "cursor:claude-opus-5",
-      ]);
+      expect(
+        p?.byModelAgent.map((entry) => `${entry.agent}:${entry.model}`).sort(),
+      ).toEqual(["claude-code:claude-opus-5", "cursor:claude-opus-5"]);
       expect(p?.byModel).toHaveLength(1);
     });
 
@@ -279,8 +392,24 @@ describe.skipIf(!hasDb)("userProfile", () => {
       const early = "2026-09-08T01:00:00Z";
       await submit(
         [
-          bucket({ hour: late, dedupe_key: dedupeKey(deviceId, late, "claude-code", "claude-opus-5") }),
-          bucket({ hour: early, dedupe_key: dedupeKey(deviceId, early, "claude-code", "claude-opus-5") }),
+          bucket({
+            hour: late,
+            dedupe_key: dedupeKey(
+              deviceId,
+              late,
+              "claude-code",
+              "claude-opus-5",
+            ),
+          }),
+          bucket({
+            hour: early,
+            dedupe_key: dedupeKey(
+              deviceId,
+              early,
+              "claude-code",
+              "claude-opus-5",
+            ),
+          }),
         ],
         1,
       );
@@ -294,7 +423,15 @@ describe.skipIf(!hasDb)("userProfile", () => {
       await submit(
         [
           bucket(),
-          bucket({ hour: old, dedupe_key: dedupeKey(deviceId, old, "claude-code", "claude-opus-5") }),
+          bucket({
+            hour: old,
+            dedupe_key: dedupeKey(
+              deviceId,
+              old,
+              "claude-code",
+              "claude-opus-5",
+            ),
+          }),
         ],
         1,
       );
@@ -337,13 +474,25 @@ describe("derivedSignals", () => {
   it("measures cache reuse against re-caching, not against input", () => {
     // The definition the gates note argues for. `cache_read / (input +
     // cache_read)` would be ~1.0 here and carry no information.
-    const s = derivedSignals({ ...base, cacheReadTokens: 800, cacheWriteTokens: 200 });
+    const s = derivedSignals({
+      ...base,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 200,
+    });
     expect(s.cacheReuse).toBeCloseTo(0.8);
   });
 
   it("discriminates between a re-cacher and a reuser", () => {
-    const thrash = derivedSignals({ ...base, cacheReadTokens: 100, cacheWriteTokens: 900 });
-    const clean = derivedSignals({ ...base, cacheReadTokens: 900, cacheWriteTokens: 100 });
+    const thrash = derivedSignals({
+      ...base,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 900,
+    });
+    const clean = derivedSignals({
+      ...base,
+      cacheReadTokens: 900,
+      cacheWriteTokens: 100,
+    });
     expect(thrash.cacheReuse).toBeCloseTo(0.1);
     expect(clean.cacheReuse).toBeCloseTo(0.9);
   });
@@ -372,6 +521,8 @@ describe("derivedSignals", () => {
   });
 
   it("returns null yield when there are no effective tokens", () => {
-    expect(derivedSignals({ ...base, effectiveTokens: 0 }).yieldPerMTok).toBeNull();
+    expect(
+      derivedSignals({ ...base, effectiveTokens: 0 }).yieldPerMTok,
+    ).toBeNull();
   });
 });

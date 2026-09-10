@@ -14,6 +14,18 @@ import type { BoardWindow } from "@usurp/db";
 import Link from "next/link";
 
 export type BoardMetric = "burn" | "rating";
+export type TrustFilter =
+  | "unverified"
+  | "cli_signed"
+  | "org_verified"
+  | undefined;
+export function parseTrust(value: string | string[] | undefined): TrustFilter {
+  return value === "unverified" ||
+    value === "cli_signed" ||
+    value === "org_verified"
+    ? value
+    : undefined;
+}
 
 const WINDOWS: Array<{ key: BoardWindow; label: string }> = [
   { key: "day", label: "24 hours" },
@@ -37,17 +49,19 @@ export default function BoardNav({
   metric,
   window,
   anchor = "",
+  trust,
 }: {
   metric: BoardMetric;
   window: BoardWindow;
   anchor?: string;
+  trust?: TrustFilter;
 }) {
   return (
     <div className="board-controls">
       <nav className="controls" aria-label="Board">
         <Link
           className="tab"
-          href={`?metric=rating${anchor}`}
+          href={`?metric=rating${trust ? `&trust=${trust}` : ""}${anchor}`}
           scroll={false}
           aria-current={metric === "rating" ? "true" : undefined}
         >
@@ -55,7 +69,7 @@ export default function BoardNav({
         </Link>
         <Link
           className="tab"
-          href={`?metric=burn&window=${window}${anchor}`}
+          href={`?metric=burn&window=${window}${trust ? `&trust=${trust}` : ""}${anchor}`}
           scroll={false}
           aria-current={metric === "burn" ? "true" : undefined}
         >
@@ -71,7 +85,7 @@ export default function BoardNav({
             <Link
               key={w.key}
               className="tab small"
-              href={`?metric=burn&window=${w.key}${anchor}`}
+              href={`?metric=burn&window=${w.key}${trust ? `&trust=${trust}` : ""}${anchor}`}
               scroll={false}
               aria-current={w.key === window ? "true" : undefined}
             >
@@ -80,6 +94,22 @@ export default function BoardNav({
           ))}
         </nav>
       )}
+      <form method="GET" className="row">
+        <input type="hidden" name="metric" value={metric} />
+        <input type="hidden" name="window" value={window} />
+        <label>
+          Trust{" "}
+          <select className="input" name="trust" defaultValue={trust ?? "all"}>
+            <option value="all">All sources</option>
+            <option value="cli_signed">CLI signed</option>
+            <option value="unverified">Unverified imports</option>
+            <option value="org_verified" disabled>
+              Org verified (disabled)
+            </option>
+          </select>
+        </label>
+        <button className="button secondary">Apply</button>
+      </form>
     </div>
   );
 }

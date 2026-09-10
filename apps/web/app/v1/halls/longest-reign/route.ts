@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { getDb, longestReigns } from "@usurp/db";
 import { NextResponse } from "next/server";
+import { currentUser } from "../../../../lib/session";
 
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
@@ -30,6 +31,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     records = await longestReigns(getDb(), {
       limit: parsed.data.limit,
+      viewerId: (await currentUser())?.id,
       ...(parsed.data.arena ? { arenaSlug: parsed.data.arena } : {}),
     });
   } catch (err) {
@@ -37,19 +39,22 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 
-  return NextResponse.json({
-    hall: "longest-reign",
-    rows: records.map((r, i) => ({
-      rank: i + 1,
-      arena: r.arena,
-      holder: r.holder,
-      started_at: r.startedAt,
-      ended_at: r.endedAt,
-      days: r.days,
-      peak_points: r.peakPoints,
-      // An open reign is still growing, which is the point of the board.
-      open: r.open,
-      ended_by: r.endedBy,
-    })),
-  });
+  return NextResponse.json(
+    {
+      hall: "longest-reign",
+      rows: records.map((r, i) => ({
+        rank: i + 1,
+        arena: r.arena,
+        holder: r.holder,
+        started_at: r.startedAt,
+        ended_at: r.endedAt,
+        days: r.days,
+        peak_points: r.peakPoints,
+        // An open reign is still growing, which is the point of the board.
+        open: r.open,
+        ended_by: r.endedBy,
+      })),
+    },
+    { headers: { "cache-control": "private, no-store" } },
+  );
 }

@@ -22,11 +22,16 @@ import {
 } from "@usurp/protocol";
 import { closeDb, getDb } from "./client.js";
 import { ingest } from "./ingest.js";
-import { issueEnrollment, redeemEnrollment, upsertUserByHandle } from "./enrollment.js";
+import {
+  issueEnrollment,
+  redeemEnrollment,
+  upsertUserByHandle,
+} from "./enrollment.js";
 import { devices, usageEvents, users, usageRepairBackups } from "./schema.js";
 import { joinGlobalArena } from "./seed.js";
 import { userProfile } from "./profile.js";
 import { dailyMetrics } from "./rating.js";
+import { importManual } from "./manual.js";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const NOW = new Date("2026-09-08T13:59:00.000Z");
@@ -70,11 +75,15 @@ describe.skipIf(!hasDb)("ingest", () => {
           cacheReadTokens: base.cache_read_tokens,
         }),
       dedupe_key:
-        overrides.dedupe_key ?? dedupeKey(deviceId, base.hour, base.agent, base.model),
+        overrides.dedupe_key ??
+        dedupeKey(deviceId, base.hour, base.agent, base.model),
     };
   }
 
-  function envelope(buckets: Bucket[], overrides: Partial<Envelope> = {}): Envelope {
+  function envelope(
+    buckets: Bucket[],
+    overrides: Partial<Envelope> = {},
+  ): Envelope {
     return {
       v: PAYLOAD_VERSION,
       device_id: deviceId,
@@ -84,6 +93,25 @@ describe.skipIf(!hasDb)("ingest", () => {
       ...overrides,
     };
   }
+
+  it("signed sync supersedes manual imports and cannot be doubled by a later upload", async () => {
+    const b = bucket();
+    expect((await importManual(db, userId, [b], NOW)).accepted).toBe(1);
+    expect(
+      (
+        await ingest(db, signPayload(envelope([b]), keys.privateKeyPem), {
+          now: NOW,
+        })
+      ).accepted,
+    ).toBe(1);
+    expect((await importManual(db, userId, [b], NOW)).accepted).toBe(0);
+    const rows = await db
+      .select()
+      .from(usageEvents)
+      .where(eq(usageEvents.userId, userId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ sigOk: true, deviceId });
+  });
 
   const submit = (env: Envelope, pem = keys.privateKeyPem) =>
     ingest(db, signPayload(env, pem), { now: NOW });
@@ -95,27 +123,61 @@ describe.skipIf(!hasDb)("ingest", () => {
     const original = bucket({ agent: "codex", input_tokens: 1000 });
     await submit(envelope([original, bucket()]));
     const corrected = bucket({ agent: "codex", input_tokens: 100 });
-    const repair = envelope([corrected], { seq: 2, reader_revision: 2, replace_agents: ["codex"] });
+    const repair = envelope([corrected], {
+      seq: 2,
+      reader_revision: 2,
+      replace_agents: ["codex"],
+    });
     const tampered = signPayload(repair, keys.privateKeyPem);
     tampered.replace_agents = ["cursor"];
-    expect((await ingest(db, tampered, { now: NOW })).failure).toBe("bad_signature");
+    expect((await ingest(db, tampered, { now: NOW })).failure).toBe(
+      "bad_signature",
+    );
     expect((await submit(repair)).ok).toBe(true);
-    expect((await rows()).find(r => r.agent === "codex")?.inputTokens).toBe(100);
-    expect((await rows()).find(r => r.agent === "claude-code")?.inputTokens).toBe(100);
-    const backups = await db.select().from(usageRepairBackups).where(eq(usageRepairBackups.deviceId, deviceId));
+    expect((await rows()).find((r) => r.agent === "codex")?.inputTokens).toBe(
+      100,
+    );
+    expect(
+      (await rows()).find((r) => r.agent === "claude-code")?.inputTokens,
+    ).toBe(100);
+    const backups = await db
+      .select()
+      .from(usageRepairBackups)
+      .where(eq(usageRepairBackups.deviceId, deviceId));
     expect(backups).toHaveLength(1);
     expect(backups[0]?.rows).toHaveLength(1);
-    expect((await submit(envelope([original], { seq: 3 }))).failure).toBe("stale_reader");
-    expect((await submit(envelope([corrected], { seq: 3, reader_revision: 2 }))).ok).toBe(true);
-    expect((await rows()).find(r => r.agent === "codex")?.inputTokens).toBe(100);
+    expect((await submit(envelope([original], { seq: 3 }))).failure).toBe(
+      "stale_reader",
+    );
+    expect(
+      (await submit(envelope([corrected], { seq: 3, reader_revision: 2 }))).ok,
+    ).toBe(true);
+    expect((await rows()).find((r) => r.agent === "codex")?.inputTokens).toBe(
+      100,
+    );
   });
 
   it("does not erase rows when any repaired bucket fails validation", async () => {
     await submit(envelope([bucket({ agent: "codex" })]));
     const invalid = bucket({ agent: "codex", calls: 0 });
-    expect((await submit(envelope([invalid], { seq: 2, reader_revision: 2, replace_agents: ["codex"] }))).failure).toBe("invalid_repair");
+    expect(
+      (
+        await submit(
+          envelope([invalid], {
+            seq: 2,
+            reader_revision: 2,
+            replace_agents: ["codex"],
+          }),
+        )
+      ).failure,
+    ).toBe("invalid_repair");
     expect(await rows()).toHaveLength(1);
-    expect(await db.select().from(usageRepairBackups).where(eq(usageRepairBackups.deviceId, deviceId))).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(usageRepairBackups)
+        .where(eq(usageRepairBackups.deviceId, deviceId)),
+    ).toHaveLength(0);
   });
 
   beforeEach(async () => {
@@ -143,17 +205,32 @@ describe.skipIf(!hasDb)("ingest", () => {
   describe("happy path", () => {
     it("imports old history into analytics, idempotently, without competitive metrics", async () => {
       const old = bucket({ hour: "2024-01-01T09:00:00Z", historical: true });
-      expect(await submit(envelope([old]))).toMatchObject({ ok: true, accepted: 1 });
-      expect(await submit(envelope([old], { seq: 2 }))).toMatchObject({ ok: true, accepted: 1 });
+      expect(await submit(envelope([old]))).toMatchObject({
+        ok: true,
+        accepted: 1,
+      });
+      expect(await submit(envelope([old], { seq: 2 }))).toMatchObject({
+        ok: true,
+        accepted: 1,
+      });
       expect(await rows()).toHaveLength(1);
       expect((await rows())[0]?.historical).toBe(true);
-      const profile = await userProfile(db, handle, { window: "all", now: NOW });
+      const profile = await userProfile(db, handle, {
+        window: "all",
+        now: NOW,
+      });
       expect(profile?.historicalBuckets).toBe(1);
       expect(profile?.totals.inputTokens).toBe(100);
-      expect(profile?.byModelAgent[0]).toMatchObject({ agent: old.agent, model: old.model });
-      expect((await userProfile(db, handle, { window: "week", now: NOW }))?.totals.calls).toBe(0);
+      expect(profile?.byModelAgent[0]).toMatchObject({
+        agent: old.agent,
+        model: old.model,
+      });
+      expect(
+        (await userProfile(db, handle, { window: "week", now: NOW }))?.totals
+          .calls,
+      ).toBe(0);
       const metrics = await dailyMetrics(db, new Date("2024-01-01"), NOW);
-      expect(metrics.filter(r => r.userId === userId)).toEqual([]);
+      expect(metrics.filter((r) => r.userId === userId)).toEqual([]);
     });
 
     it("cannot promote a historical bucket into competitive usage by resubmitting it", async () => {
@@ -161,20 +238,28 @@ describe.skipIf(!hasDb)("ingest", () => {
       await submit(envelope([bucket()], { seq: 2 }));
       expect((await rows())[0]?.historical).toBe(true);
       const metrics = await dailyMetrics(db, new Date("2026-09-08"), NOW);
-      expect(metrics.filter(r => r.userId === userId)).toEqual([]);
+      expect(metrics.filter((r) => r.userId === userId)).toEqual([]);
     });
 
     it("authenticates the historical flag as part of the signed bucket", async () => {
       const signed = signPayload(envelope([bucket()]), keys.privateKeyPem);
       signed.buckets[0]!.historical = true;
-      expect(await ingest(db, signed, { now: NOW })).toMatchObject({ ok: false, failure: "bad_signature" });
+      expect(await ingest(db, signed, { now: NOW })).toMatchObject({
+        ok: false,
+        failure: "bad_signature",
+      });
       expect(await rows()).toHaveLength(0);
     });
 
     it("accepts a signed batch and stores the counters", async () => {
       const result = await submit(envelope([bucket()]));
 
-      expect(result).toMatchObject({ ok: true, accepted: 1, rejected: [], flags: [] });
+      expect(result).toMatchObject({
+        ok: true,
+        accepted: 1,
+        rejected: [],
+        flags: [],
+      });
 
       const stored = await rows();
       expect(stored).toHaveLength(1);
@@ -198,7 +283,10 @@ describe.skipIf(!hasDb)("ingest", () => {
     it("advances the device's seq and last_seen_at", async () => {
       await submit(envelope([bucket()], { seq: 7 }));
 
-      const [device] = await db.select().from(devices).where(eq(devices.id, deviceId));
+      const [device] = await db
+        .select()
+        .from(devices)
+        .where(eq(devices.id, deviceId));
       expect(device!.lastSeq).toBe(7);
       expect(device!.lastSeenAt?.toISOString()).toBe(NOW.toISOString());
     });
@@ -209,7 +297,12 @@ describe.skipIf(!hasDb)("ingest", () => {
           bucket(),
           bucket({
             hour: "2026-09-08T12:00:00Z",
-            dedupe_key: dedupeKey(deviceId, "2026-09-08T12:00:00Z", "claude-code", "claude-opus-5"),
+            dedupe_key: dedupeKey(
+              deviceId,
+              "2026-09-08T12:00:00Z",
+              "claude-code",
+              "claude-opus-5",
+            ),
           }),
         ]),
       );
@@ -231,18 +324,29 @@ describe.skipIf(!hasDb)("ingest", () => {
     it("refuses an unknown device", async () => {
       const result = await ingest(
         db,
-        signPayload(envelope([bucket()], { device_id: "dev_nope" }), keys.privateKeyPem),
+        signPayload(
+          envelope([bucket()], { device_id: "dev_nope" }),
+          keys.privateKeyPem,
+        ),
         { now: NOW },
       );
 
-      expect(result).toMatchObject({ ok: false, failure: "unknown_device", accepted: 0 });
+      expect(result).toMatchObject({
+        ok: false,
+        failure: "unknown_device",
+        accepted: 0,
+      });
     });
 
     it("refuses a batch signed with the wrong key", async () => {
       const mallory = generateDeviceKeyPair();
       const result = await submit(envelope([bucket()]), mallory.privateKeyPem);
 
-      expect(result).toMatchObject({ ok: false, failure: "bad_signature", accepted: 0 });
+      expect(result).toMatchObject({
+        ok: false,
+        failure: "bad_signature",
+        accepted: 0,
+      });
       // A forgery must not create a row under the impersonated device.
       expect(await rows()).toHaveLength(0);
     });
@@ -260,7 +364,10 @@ describe.skipIf(!hasDb)("ingest", () => {
     });
 
     it("refuses a revoked device", async () => {
-      await db.update(devices).set({ revokedAt: NOW }).where(eq(devices.id, deviceId));
+      await db
+        .update(devices)
+        .set({ revokedAt: NOW })
+        .where(eq(devices.id, deviceId));
       const result = await submit(envelope([bucket()]));
 
       expect(result).toMatchObject({ ok: false, failure: "device_revoked" });
@@ -300,7 +407,10 @@ describe.skipIf(!hasDb)("ingest", () => {
       const mallory = generateDeviceKeyPair();
       await submit(envelope([bucket()], { seq: 4 }), mallory.privateKeyPem);
 
-      const [device] = await db.select().from(devices).where(eq(devices.id, deviceId));
+      const [device] = await db
+        .select()
+        .from(devices)
+        .where(eq(devices.id, deviceId));
       // A rejected forgery must not burn seq 4 for the legitimate device.
       expect(device!.lastSeq).toBe(3);
       expect((await submit(envelope([bucket()], { seq: 4 }))).ok).toBe(true);
@@ -314,16 +424,24 @@ describe.skipIf(!hasDb)("ingest", () => {
    */
   describe("GREATEST upsert", () => {
     it("bulk imports across chunk boundaries and preserves repeated-key max merge", async () => {
-      const buckets = Array.from({ length: 250 }, (_, i) => bucket({
-        hour: new Date(Date.parse(HOUR) - i * 3600_000).toISOString(),
-      }));
-      buckets.push(bucket({ hour: buckets[0]!.hour, calls: 9, input_tokens: 900 }));
-      buckets.push(bucket({ hour: buckets[0]!.hour, calls: 2, input_tokens: 100 }));
+      const buckets = Array.from({ length: 250 }, (_, i) =>
+        bucket({
+          hour: new Date(Date.parse(HOUR) - i * 3600_000).toISOString(),
+        }),
+      );
+      buckets.push(
+        bucket({ hour: buckets[0]!.hour, calls: 9, input_tokens: 900 }),
+      );
+      buckets.push(
+        bucket({ hour: buckets[0]!.hour, calls: 2, input_tokens: 100 }),
+      );
       const result = await submit(envelope(buckets));
       expect(result).toMatchObject({ ok: true, accepted: 252, rejected: [] });
       const stored = await rows();
       expect(stored).toHaveLength(250);
-      expect(stored.find(row => row.dedupeKey === buckets[0]!.dedupe_key)).toMatchObject({ calls: 9, inputTokens: 900 });
+      expect(
+        stored.find((row) => row.dedupeKey === buckets[0]!.dedupe_key),
+      ).toMatchObject({ calls: 9, inputTokens: 900 });
     });
 
     it("is a true no-op for identical values", async () => {
@@ -340,18 +458,32 @@ describe.skipIf(!hasDb)("ingest", () => {
 
     it("admits a late correction that raises a counter", async () => {
       // First sync: the session was still running, so no completion yet.
-      await submit(envelope([bucket({ sessions_completed: 0, calls: 5 })], { seq: 1 }));
-      expect((await rows())[0]).toMatchObject({ sessionsCompleted: 0, calls: 5 });
+      await submit(
+        envelope([bucket({ sessions_completed: 0, calls: 5 })], { seq: 1 }),
+      );
+      expect((await rows())[0]).toMatchObject({
+        sessionsCompleted: 0,
+        calls: 5,
+      });
 
       // Re-read after the session finished.
-      await submit(envelope([bucket({ sessions_completed: 1, calls: 9 })], { seq: 2 }));
-      expect((await rows())[0]).toMatchObject({ sessionsCompleted: 1, calls: 9 });
+      await submit(
+        envelope([bucket({ sessions_completed: 1, calls: 9 })], { seq: 2 }),
+      );
+      expect((await rows())[0]).toMatchObject({
+        sessionsCompleted: 1,
+        calls: 9,
+      });
     });
 
     it("never lets a narrower re-read erase what is already known", async () => {
-      await submit(envelope([bucket({ calls: 9, input_tokens: 900 })], { seq: 1 }));
+      await submit(
+        envelope([bucket({ calls: 9, input_tokens: 900 })], { seq: 1 }),
+      );
       // A shorter lookback window can honestly report less for the same hour.
-      await submit(envelope([bucket({ calls: 2, input_tokens: 100 })], { seq: 2 }));
+      await submit(
+        envelope([bucket({ calls: 2, input_tokens: 100 })], { seq: 2 }),
+      );
 
       expect((await rows())[0]).toMatchObject({ calls: 9, inputTokens: 900 });
     });
@@ -377,13 +509,20 @@ describe.skipIf(!hasDb)("ingest", () => {
             input_tokens: 2_000_000,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
-            dedupe_key: dedupeKey(deviceId, "2026-09-08T12:00:00Z", "claude-code", "claude-opus-5"),
+            dedupe_key: dedupeKey(
+              deviceId,
+              "2026-09-08T12:00:00Z",
+              "claude-code",
+              "claude-opus-5",
+            ),
           }),
         ]),
       );
 
       expect(result.accepted).toBe(1);
-      expect(result.rejected.map((r) => r.code)).toEqual(["context_window_exceeded"]);
+      expect(result.rejected.map((r) => r.code)).toEqual([
+        "context_window_exceeded",
+      ]);
       expect(await rows()).toHaveLength(1);
     });
 
@@ -393,17 +532,30 @@ describe.skipIf(!hasDb)("ingest", () => {
       );
 
       expect(result.ok).toBe(false);
-      expect(result.rejected.map((r) => r.code)).toContain("submission_too_old");
+      expect(result.rejected.map((r) => r.code)).toContain(
+        "submission_too_old",
+      );
       expect(await rows()).toHaveLength(0);
     });
 
     it("refuses a bucket whose dedupe_key belongs to another device", async () => {
       const result = await submit(
-        envelope([bucket({ dedupe_key: dedupeKey("dev_victim", HOUR, "claude-code", "claude-opus-5") })]),
+        envelope([
+          bucket({
+            dedupe_key: dedupeKey(
+              "dev_victim",
+              HOUR,
+              "claude-code",
+              "claude-opus-5",
+            ),
+          }),
+        ]),
       );
 
       expect(result.accepted).toBe(0);
-      expect(result.rejected.map((r) => r.code)).toEqual(["dedupe_key_mismatch"]);
+      expect(result.rejected.map((r) => r.code)).toEqual([
+        "dedupe_key_mismatch",
+      ]);
     });
   });
 
@@ -411,18 +563,66 @@ describe.skipIf(!hasDb)("ingest", () => {
     it("counts overlapping history from separate installations but not a re-enrollment", async () => {
       const installationA = "12345678-1234-4123-8123-123456789abc";
       const installationB = "22345678-1234-4123-8123-123456789abc";
-      expect((await submit(envelope([bucket()], { installation_id: installationA }))).accepted).toBe(1);
-      for (const [installation, accepted] of [[installationB, 1], [installationA, 0]] as const) {
-        const next = await secondDeviceFor(userId, new Date("2026-09-08T20:00:00Z"));
-        const result = await ingest(db, signPayload({ v: 1, device_id: next.deviceId, seq: 1, submitted_at: NOW.toISOString(), installation_id: installation,
-          buckets: [{ ...bucket(), dedupe_key: dedupeKey(next.deviceId, HOUR, "claude-code", "claude-opus-5") }] }, next.keys.privateKeyPem), { now: NOW });
+      expect(
+        (await submit(envelope([bucket()], { installation_id: installationA })))
+          .accepted,
+      ).toBe(1);
+      for (const [installation, accepted] of [
+        [installationB, 1],
+        [installationA, 0],
+      ] as const) {
+        const next = await secondDeviceFor(
+          userId,
+          new Date("2026-09-08T20:00:00Z"),
+        );
+        const result = await ingest(
+          db,
+          signPayload(
+            {
+              v: 1,
+              device_id: next.deviceId,
+              seq: 1,
+              submitted_at: NOW.toISOString(),
+              installation_id: installation,
+              buckets: [
+                {
+                  ...bucket(),
+                  dedupe_key: dedupeKey(
+                    next.deviceId,
+                    HOUR,
+                    "claude-code",
+                    "claude-opus-5",
+                  ),
+                },
+              ],
+            },
+            next.keys.privateKeyPem,
+          ),
+          { now: NOW },
+        );
         expect(result.accepted).toBe(accepted);
       }
-      expect(await db.select().from(usageEvents).where(eq(usageEvents.userId, userId))).toHaveLength(2);
-      expect((await submit(envelope([bucket()], { seq: 2, installation_id: installationB }))).failure).toBe("invalid_repair");
-      const tampered = signPayload(envelope([bucket()], { seq: 2, installation_id: installationA }), keys.privateKeyPem);
+      expect(
+        await db
+          .select()
+          .from(usageEvents)
+          .where(eq(usageEvents.userId, userId)),
+      ).toHaveLength(2);
+      expect(
+        (
+          await submit(
+            envelope([bucket()], { seq: 2, installation_id: installationB }),
+          )
+        ).failure,
+      ).toBe("invalid_repair");
+      const tampered = signPayload(
+        envelope([bucket()], { seq: 2, installation_id: installationA }),
+        keys.privateKeyPem,
+      );
       tampered.installation_id = installationB;
-      expect((await ingest(db, tampered, { now: NOW })).failure).toBe("bad_signature");
+      expect((await ingest(db, tampered, { now: NOW })).failure).toBe(
+        "bad_signature",
+      );
     });
     /**
      * The bug this exists for: `dedupe_key` is per-device, so re-enrolling one
@@ -450,7 +650,10 @@ describe.skipIf(!hasDb)("ingest", () => {
       expect(await rows()).toHaveLength(1);
 
       // A re-enrolment of the same machine, created after that hour.
-      const second = await secondDeviceFor(userId, new Date("2026-09-08T20:00:00.000Z"));
+      const second = await secondDeviceFor(
+        userId,
+        new Date("2026-09-08T20:00:00.000Z"),
+      );
 
       const result = await ingest(
         db,
@@ -463,7 +666,12 @@ describe.skipIf(!hasDb)("ingest", () => {
             buckets: [
               {
                 ...bucket(),
-                dedupe_key: dedupeKey(second.deviceId, HOUR, "claude-code", "claude-opus-5"),
+                dedupe_key: dedupeKey(
+                  second.deviceId,
+                  HOUR,
+                  "claude-code",
+                  "claude-opus-5",
+                ),
               },
             ],
           },
@@ -473,7 +681,9 @@ describe.skipIf(!hasDb)("ingest", () => {
       );
 
       expect(result.accepted).toBe(0);
-      expect(result.rejected.map((r) => r.code)).toContain("duplicate_backfill");
+      expect(result.rejected.map((r) => r.code)).toContain(
+        "duplicate_backfill",
+      );
 
       // The board must not have doubled.
       const stored = await db
@@ -487,7 +697,10 @@ describe.skipIf(!hasDb)("ingest", () => {
       await submit(envelope([bucket()]));
 
       // Enrolled *before* the hour it reports — genuinely new work.
-      const second = await secondDeviceFor(userId, new Date("2026-09-08T00:00:00.000Z"));
+      const second = await secondDeviceFor(
+        userId,
+        new Date("2026-09-08T00:00:00.000Z"),
+      );
       const laterHour = "2026-09-08T15:00:00Z";
 
       const result = await ingest(
@@ -501,7 +714,12 @@ describe.skipIf(!hasDb)("ingest", () => {
             buckets: [
               {
                 ...bucket({ hour: laterHour }),
-                dedupe_key: dedupeKey(second.deviceId, laterHour, "claude-code", "claude-opus-5"),
+                dedupe_key: dedupeKey(
+                  second.deviceId,
+                  laterHour,
+                  "claude-code",
+                  "claude-opus-5",
+                ),
               },
             ],
           },
@@ -518,7 +736,10 @@ describe.skipIf(!hasDb)("ingest", () => {
       // which is why the guard keys on the enrolment boundary, not on overlap.
       await submit(envelope([bucket()]));
 
-      const second = await secondDeviceFor(userId, new Date("2026-09-08T00:00:00.000Z"));
+      const second = await secondDeviceFor(
+        userId,
+        new Date("2026-09-08T00:00:00.000Z"),
+      );
 
       const result = await ingest(
         db,
@@ -531,7 +752,12 @@ describe.skipIf(!hasDb)("ingest", () => {
             buckets: [
               {
                 ...bucket(),
-                dedupe_key: dedupeKey(second.deviceId, HOUR, "claude-code", "claude-opus-5"),
+                dedupe_key: dedupeKey(
+                  second.deviceId,
+                  HOUR,
+                  "claude-code",
+                  "claude-opus-5",
+                ),
               },
             ],
           },
@@ -541,15 +767,26 @@ describe.skipIf(!hasDb)("ingest", () => {
       );
 
       expect(result.accepted).toBe(1);
-      expect(await db.select().from(usageEvents).where(eq(usageEvents.userId, userId))).toHaveLength(2);
+      expect(
+        await db
+          .select()
+          .from(usageEvents)
+          .where(eq(usageEvents.userId, userId)),
+      ).toHaveLength(2);
     });
   });
 
   describe("concurrency", () => {
     it("serializes racing syncs so only one wins a given seq", async () => {
       // The `SessionEnd` hook firing while a manual sync is in flight.
-      const a = signPayload(envelope([bucket({ calls: 5 })], { seq: 1 }), keys.privateKeyPem);
-      const b = signPayload(envelope([bucket({ calls: 7 })], { seq: 1 }), keys.privateKeyPem);
+      const a = signPayload(
+        envelope([bucket({ calls: 5 })], { seq: 1 }),
+        keys.privateKeyPem,
+      );
+      const b = signPayload(
+        envelope([bucket({ calls: 7 })], { seq: 1 }),
+        keys.privateKeyPem,
+      );
 
       const results = await Promise.all([
         ingest(db, a, { now: NOW }),

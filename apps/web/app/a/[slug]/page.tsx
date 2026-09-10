@@ -3,10 +3,17 @@ import BoardView from "../../board-view";
 import RatingView from "../../rating-view";
 import FeedView from "../../feed-view";
 import HeroStats from "../../hero-stats";
-import BoardNav, { parseMetric, parseWindow } from "../../board-nav";
+import BoardNav, {
+  parseMetric,
+  parseWindow,
+  parseTrust,
+} from "../../board-nav";
 import { baseUrl } from "../../../lib/env";
 import ShareMenu from "../../share-menu";
 import LiveRefresh from "../../live-refresh";
+import { notFound } from "next/navigation";
+import { currentUser } from "../../../lib/session";
+import { canViewArena } from "../../../lib/arena-access";
 
 export async function generateMetadata({
   params,
@@ -18,7 +25,8 @@ export async function generateMetadata({
 
   return {
     title: `Usurp — ${slug}`,
-    description: "The live Usurp rating board. Hold the Throne, or lose it to someone playing better.",
+    description:
+      "The live Usurp rating board. Hold the Throne, or lose it to someone playing better.",
     alternates: { canonical: url },
   };
 }
@@ -31,8 +39,10 @@ export default async function ArenaPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [{ slug }, query] = await Promise.all([params, searchParams]);
+  if (!(await canViewArena(slug, (await currentUser())?.id))) notFound();
   const metric = parseMetric(query.metric);
   const window = parseWindow(query.window);
+  const trust = parseTrust(query.trust);
 
   return (
     <main className="wrap">
@@ -53,9 +63,13 @@ export default async function ArenaPage({
 
       <HeroStats />
 
-      <BoardNav metric={metric} window={window} />
-      <LiveRefresh />
-      <p className="board-explainer">{metric === "rating" ? "Seasonal points combine volume, efficiency, and streaks. Titles are earned here." : "Burn measures volume, not skill. Cost is estimated from native usage; daily bridge snapshots appear on usage profiles."}</p>
+      <BoardNav metric={metric} window={window} trust={trust} />
+      <LiveRefresh slug={slug} />
+      <p className="board-explainer">
+        {metric === "rating"
+          ? "Seasonal points combine volume, efficiency, and streaks. Titles are earned here."
+          : "Burn measures volume, not skill. Cost is estimated from native usage; daily bridge snapshots appear on usage profiles."}
+      </p>
 
       {metric === "rating" && (
         <div className="share-line">
@@ -69,11 +83,11 @@ export default async function ArenaPage({
 
       {metric === "rating" ? (
         <>
-          <RatingView slug={slug} />
+          <RatingView slug={slug} trust={trust} />
           <FeedView slug={slug} />
         </>
       ) : (
-        <BoardView slug={slug} window={window} />
+        <BoardView slug={slug} window={window} trust={trust} />
       )}
     </main>
   );

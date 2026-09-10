@@ -152,17 +152,23 @@ describe.skipIf(!hasDb)("arenas (database)", () => {
 
       // Fill to the cap directly — creating 49 users through OAuth would make
       // this test about signup throughput rather than the cap.
-      await db.execute(sql`
+      await db
+        .execute(
+          sql`
         insert into ${arenaMembers} (arena_id, user_id, visibility, status)
         select ${arena.id}, gen_random_uuid(), 'public', 'active'
         from generate_series(1, ${CLUB_MAX_MEMBERS - 1})
-      `).catch(async () => {
-        // The user_id FK forbids synthetic ids; fall back to real users.
-        for (let i = 0; i < CLUB_MAX_MEMBERS - 1; i++) {
-          const u = await newUser();
-          await db.insert(arenaMembers).values({ arenaId: arena.id, userId: u.id });
-        }
-      });
+      `,
+        )
+        .catch(async () => {
+          // The user_id FK forbids synthetic ids; fall back to real users.
+          for (let i = 0; i < CLUB_MAX_MEMBERS - 1; i++) {
+            const u = await newUser();
+            await db
+              .insert(arenaMembers)
+              .values({ arenaId: arena.id, userId: u.id });
+          }
+        });
 
       const late = await newUser();
       expect(await joinByInviteCode(db, late.id, arena.inviteCode!)).toEqual({
@@ -175,7 +181,10 @@ describe.skipIf(!hasDb)("arenas (database)", () => {
       const owner = await newUser();
       const { arena } = await newClub(owner.id);
       // Cap this club at 2 so exactly one slot remains after the owner.
-      await db.update(arenas).set({ maxMembers: 2 }).where(eq(arenas.id, arena.id));
+      await db
+        .update(arenas)
+        .set({ maxMembers: 2 })
+        .where(eq(arenas.id, arena.id));
 
       const a = await newUser();
       const b = await newUser();
@@ -186,21 +195,32 @@ describe.skipIf(!hasDb)("arenas (database)", () => {
       ]);
 
       expect(results.filter((r) => r.ok)).toHaveLength(1);
-      expect(results.filter((r) => !r.ok && r.failure === "club_full")).toHaveLength(1);
+      expect(
+        results.filter((r) => !r.ok && r.failure === "club_full"),
+      ).toHaveLength(1);
     });
 
     it("frees a slot when someone leaves", async () => {
       const owner = await newUser();
       const { arena } = await newClub(owner.id);
-      await db.update(arenas).set({ maxMembers: 2 }).where(eq(arenas.id, arena.id));
+      await db
+        .update(arenas)
+        .set({ maxMembers: 2 })
+        .where(eq(arenas.id, arena.id));
 
       const a = await newUser();
       const b = await newUser();
-      expect((await joinByInviteCode(db, a.id, arena.inviteCode!)).ok).toBe(true);
-      expect((await joinByInviteCode(db, b.id, arena.inviteCode!)).ok).toBe(false);
+      expect((await joinByInviteCode(db, a.id, arena.inviteCode!)).ok).toBe(
+        true,
+      );
+      expect((await joinByInviteCode(db, b.id, arena.inviteCode!)).ok).toBe(
+        false,
+      );
 
       await leaveArena(db, a.id, arena.id);
-      expect((await joinByInviteCode(db, b.id, arena.inviteCode!)).ok).toBe(true);
+      expect((await joinByInviteCode(db, b.id, arena.inviteCode!)).ok).toBe(
+        true,
+      );
     });
   });
 
@@ -219,49 +239,12 @@ describe.skipIf(!hasDb)("arenas (database)", () => {
       return arena!;
     }
 
-    it("starts an org membership hidden, not public", async () => {
+    it("does not let legacy invite codes bypass verified email and consent", async () => {
       const org = await newOrg();
       const joiner = await newUser();
 
       const result = await joinByInviteCode(db, joiner.id, org.inviteCode!);
-      expect(result.ok).toBe(true);
-      if (result.ok) expect(result.member.visibility).toBe("hidden");
-    });
-
-    it("allows at most one org", async () => {
-      const first = await newOrg();
-      const second = await newOrg();
-      const joiner = await newUser();
-
-      expect((await joinByInviteCode(db, joiner.id, first.inviteCode!)).ok).toBe(true);
-      expect(await joinByInviteCode(db, joiner.id, second.inviteCode!)).toEqual({
-        ok: false,
-        failure: "already_in_org",
-      });
-    });
-
-    it("resets to hidden on rejoin, so leaving cannot quietly re-expose you", async () => {
-      const org = await newOrg();
-      const joiner = await newUser();
-
-      await joinByInviteCode(db, joiner.id, org.inviteCode!);
-      await setVisibility(db, joiner.id, org.id, "public");
-      await leaveArena(db, joiner.id, org.id);
-
-      const rejoined = await joinByInviteCode(db, joiner.id, org.inviteCode!);
-      expect(rejoined.ok).toBe(true);
-      if (rejoined.ok) {
-        expect(rejoined.rejoined).toBe(true);
-        expect(rejoined.member.visibility).toBe("hidden");
-      }
-    });
-
-    it("lets someone rejoin an org they left, since the slot was theirs", async () => {
-      const org = await newOrg();
-      const joiner = await newUser();
-      await joinByInviteCode(db, joiner.id, org.inviteCode!);
-      await leaveArena(db, joiner.id, org.id);
-      expect((await joinByInviteCode(db, joiner.id, org.inviteCode!)).ok).toBe(true);
+      expect(result).toEqual({ ok: false, failure: "invalid_code" });
     });
   });
 
@@ -313,19 +296,23 @@ describe.skipIf(!hasDb)("arenas (database)", () => {
       await joinGlobalArena(db, user.id);
       const globalArena = await seedGlobalArena(db);
 
-      expect((await membershipsFor(db, user.id)).map((m) => m.arena.slug)).toContain("global");
+      expect(
+        (await membershipsFor(db, user.id)).map((m) => m.arena.slug),
+      ).toContain("global");
 
       await leaveArena(db, user.id, globalArena.id);
-      expect((await membershipsFor(db, user.id)).map((m) => m.arena.slug)).not.toContain(
-        "global",
-      );
+      expect(
+        (await membershipsFor(db, user.id)).map((m) => m.arena.slug),
+      ).not.toContain("global");
 
       // The regression: with `onConflictDoNothing` this silently changed
       // nothing and the membership stayed `left` forever.
       await joinGlobalArena(db, user.id);
       const after = await membershipsFor(db, user.id);
       expect(after.map((m) => m.arena.slug)).toContain("global");
-      expect(after.find((m) => m.arena.slug === "global")!.status).toBe("active");
+      expect(after.find((m) => m.arena.slug === "global")!.status).toBe(
+        "active",
+      );
     });
 
     it("does not un-hide a current member who opts in again", async () => {

@@ -33,18 +33,34 @@ import {
 } from "drizzle-orm/pg-core";
 
 /** `#2` — per-arena visibility. `anonymous` competes under a pseudonym. */
-export const visibilityEnum = pgEnum("visibility", ["public", "anonymous", "hidden"]);
+export const visibilityEnum = pgEnum("visibility", [
+  "public",
+  "anonymous",
+  "hidden",
+]);
 
 /** `#2` — the three scopes, one entity. */
 export const arenaTypeEnum = pgEnum("arena_type", ["global", "org", "club"]);
 
 /** `#3.4` — trust tiers, shown as a badge and filterable on every board. */
-export const trustTierEnum = pgEnum("trust_tier", ["unverified", "cli_signed", "org_verified"]);
+export const trustTierEnum = pgEnum("trust_tier", [
+  "unverified",
+  "cli_signed",
+  "org_verified",
+]);
 
 /** `#5.2` — eliminated members stay visible, greyed as "out". */
-export const memberStatusEnum = pgEnum("member_status", ["active", "eliminated", "left"]);
+export const memberStatusEnum = pgEnum("member_status", [
+  "active",
+  "eliminated",
+  "left",
+]);
 
-export const seasonStateEnum = pgEnum("season_state", ["upcoming", "active", "closed"]);
+export const seasonStateEnum = pgEnum("season_state", [
+  "upcoming",
+  "active",
+  "closed",
+]);
 
 export const duelStateEnum = pgEnum("duel_state", [
   "proposed",
@@ -59,7 +75,10 @@ export const duelStateEnum = pgEnum("duel_state", [
  * hard-rejecting, because false positives on a heavy user are worse than a
  * slow cheat.
  */
-export const reviewStateEnum = pgEnum("review_state", ["clear", "shadow_frozen"]);
+export const reviewStateEnum = pgEnum("review_state", [
+  "clear",
+  "shadow_frozen",
+]);
 
 export const users = pgTable(
   "users",
@@ -70,7 +89,9 @@ export const users = pgTable(
     avatarUrl: text("avatar_url"),
     /** Set from the OAuth identity; `#2` uses it for org verification. */
     emailDomain: text("email_domain"),
-    defaultVisibility: visibilityEnum("default_visibility").notNull().default("public"),
+    defaultVisibility: visibilityEnum("default_visibility")
+      .notNull()
+      .default("public"),
     reviewState: reviewStateEnum("review_state").notNull().default("clear"),
     /**
      * Whether the user has accepted or chosen their handle.
@@ -82,7 +103,9 @@ export const users = pgTable(
      * handle is never mistaken for a chosen one.
      */
     handleConfirmed: boolean("handle_confirmed").notNull().default(false),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     // Uniqueness is on `lower(handle)`, not `handle`: on a board where the
@@ -90,6 +113,24 @@ export const users = pgTable(
     // two competitors. Callers still store the casing the user chose.
     uniqueIndex("users_handle_lower_idx").on(sql`lower(${t.handle})`),
   ],
+);
+
+/** Operator review audit; erased with the account, never shown on public feeds. */
+export const usageReviews = pgTable(
+  "usage_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: reviewStateEnum("state").notNull(),
+    reason: text("reason").notNull(),
+    reviewer: text("reviewer").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("usage_reviews_user_created_idx").on(t.userId, t.createdAt)],
 );
 
 export const identities = pgTable(
@@ -100,7 +141,9 @@ export const identities = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     providerUid: text("provider_uid").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.provider, t.providerUid] }),
@@ -126,9 +169,13 @@ export const sessions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     /** Refreshed on use, to drive the sliding window without a write per hit. */
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     /** Coarse provenance for a "your sessions" list. Never a full user agent. */
     userAgent: text("user_agent"),
   },
@@ -167,7 +214,9 @@ export const devices = pgTable(
      */
     lastSeq: bigint("last_seq", { mode: "number" }).notNull().default(0),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     /** Set to revoke a lost or compromised device without touching the account. */
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
@@ -180,17 +229,54 @@ export const devices = pgTable(
 );
 
 /** Short-lived passwordless challenges. Neither codes nor browser tokens are stored. */
-export const emailChallenges = pgTable("email_challenges", {
-  idHash: text("id_hash").primaryKey(),
-  email: text("email").notNull(),
-  codeHash: text("code_hash").notNull(),
-  linkUserId: uuid("link_user_id").references(() => users.id, { onDelete: "cascade" }),
-  returnTo: text("return_to").notNull(),
-  attempts: integer("attempts").notNull().default(0),
-  consumedAt: timestamp("consumed_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-}, t => [index("email_challenges_email_created_idx").on(t.email, t.createdAt)]);
+export const emailChallenges = pgTable(
+  "email_challenges",
+  {
+    idHash: text("id_hash").primaryKey(),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    linkUserId: uuid("link_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    returnTo: text("return_to").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("email_challenges_email_created_idx").on(t.email, t.createdAt)],
+);
+
+export const requestLimits = pgTable(
+  "request_limits",
+  {
+    key: text("key").primaryKey(),
+    count: integer("count").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("request_limits_expiry_idx").on(t.expiresAt)],
+);
+
+/** DNS ownership, separate from member consent and authoritative usage verification. */
+export const orgDomains = pgTable(
+  "org_domains",
+  {
+    arenaId: uuid("arena_id")
+      .primaryKey()
+      .references(() => arenas.id, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    challengeHash: text("challenge_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("org_domains_verified_idx")
+      .on(t.domain)
+      .where(sql`${t.verifiedAt} is not null`),
+  ],
+);
 
 /**
  * One-time device enrollment codes.
@@ -211,7 +297,9 @@ export const deviceEnrollments = pgTable(
     usedAt: timestamp("used_at", { withTimezone: true }),
     /** The device the code produced, for audit. */
     deviceId: text("device_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [index("device_enrollments_user_idx").on(t.userId)],
 );
@@ -242,10 +330,18 @@ export const usageEvents = pgTable(
     /** UTC hour boundary. */
     hour: timestamp("hour", { withTimezone: true }).notNull(),
 
-    inputTokens: bigint("input_tokens", { mode: "number" }).notNull().default(0),
-    outputTokens: bigint("output_tokens", { mode: "number" }).notNull().default(0),
-    cacheWriteTokens: bigint("cache_write_tokens", { mode: "number" }).notNull().default(0),
-    cacheReadTokens: bigint("cache_read_tokens", { mode: "number" }).notNull().default(0),
+    inputTokens: bigint("input_tokens", { mode: "number" })
+      .notNull()
+      .default(0),
+    outputTokens: bigint("output_tokens", { mode: "number" })
+      .notNull()
+      .default(0),
+    cacheWriteTokens: bigint("cache_write_tokens", { mode: "number" })
+      .notNull()
+      .default(0),
+    cacheReadTokens: bigint("cache_read_tokens", { mode: "number" })
+      .notNull()
+      .default(0),
 
     calls: integer("calls").notNull().default(0),
     sessionsStarted: integer("sessions_started").notNull().default(0),
@@ -264,8 +360,12 @@ export const usageEvents = pgTable(
     sigOk: boolean("sig_ok").notNull(),
     /** Non-fatal gate codes from `#3.4`, e.g. `["cost_mismatch"]`. */
     flags: jsonb("flags").$type<string[]>().notNull().default([]),
-    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     /**
@@ -291,12 +391,19 @@ export const usageEvents = pgTable(
 export const efficiencyFeedback = pgTable(
   "efficiency_feedback",
   {
-    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     recommendation: text("recommendation").notNull(),
     response: text("response").notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.recommendation] }), index("efficiency_feedback_user_idx").on(t.userId)],
+  (t) => [
+    primaryKey({ columns: [t.userId, t.recommendation] }),
+    index("efficiency_feedback_user_idx").on(t.userId),
+  ],
 );
 
 export const arenas = pgTable(
@@ -307,11 +414,18 @@ export const arenas = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     inviteCode: text("invite_code"),
-    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     /** `#2` — clubs cap at 50; global and org are unbounded (null). */
     maxMembers: integer("max_members"),
-    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    settings: jsonb("settings")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("arenas_slug_idx").on(t.slug),
@@ -328,7 +442,9 @@ export const arenaMembers = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     /**
      * `#2` — org arenas default to `hidden` and are opt-in per member. That
      * default is the product invariant that separates Usurp from an internal
@@ -355,7 +471,10 @@ export const seasons = pgTable(
     startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
     endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
     /** `#5.2` — the shrinking-circle schedule for this season. */
-    circleSchedule: jsonb("circle_schedule").$type<Record<string, unknown>>().notNull().default({}),
+    circleSchedule: jsonb("circle_schedule")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
     state: seasonStateEnum("state").notNull().default("upcoming"),
   },
   (t) => [uniqueIndex("seasons_arena_idx_idx").on(t.arenaId, t.idx)],
@@ -378,7 +497,9 @@ export const dailyScores = pgTable(
     efficiencyMultBp: integer("efficiency_mult_bp").notNull().default(10_000),
     streakMultBp: integer("streak_mult_bp").notNull().default(10_000),
     points: integer("points").notNull().default(0),
-    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+    computedAt: timestamp("computed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.day] })],
 );
@@ -410,7 +531,9 @@ export const standings = pgTable(
     rank: integer("rank"),
     prevRank: integer("prev_rank"),
     status: memberStatusEnum("status").notNull().default("active"),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.seasonId, t.userId] }),
@@ -433,9 +556,13 @@ export const reigns = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
-    endedByUserId: uuid("ended_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    endedByUserId: uuid("ended_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     peakPoints: integer("peak_points").notNull().default(0),
   },
   (t) => [
@@ -464,7 +591,9 @@ export const duels = pgTable(
     windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
     windowEnd: timestamp("window_end", { withTimezone: true }).notNull(),
     state: duelStateEnum("state").notNull().default("proposed"),
-    winnerId: uuid("winner_id").references(() => users.id, { onDelete: "set null" }),
+    winnerId: uuid("winner_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => [
     // `#5` caps duels at 2 concurrent per user; both sides need a cheap count.
@@ -484,18 +613,33 @@ export const events = pgTable(
   "events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    arenaId: uuid("arena_id").references(() => arenas.id, { onDelete: "cascade" }),
+    arenaId: uuid("arena_id").references(() => arenas.id, {
+      onDelete: "cascade",
+    }),
     type: text("type").notNull(),
-    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
-    targetId: uuid("target_id").references(() => users.id, { onDelete: "set null" }),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    actorId: uuid("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    targetId: uuid("target_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [index("events_arena_created_idx").on(t.arenaId, t.createdAt)],
 );
 
 /** `#9` M3 — "notifications (email / webhook / Slack)". */
-export const channelKindEnum = pgEnum("channel_kind", ["webhook", "slack", "email"]);
+export const channelKindEnum = pgEnum("channel_kind", [
+  "webhook",
+  "slack",
+  "email",
+]);
 
 export const deliveryStatusEnum = pgEnum("delivery_status", [
   "pending",
@@ -530,12 +674,18 @@ export const notificationChannels = pgTable(
     /** Last delivery failure, surfaced in settings so a dead URL is visible. */
     lastError: text("last_error"),
     lastDeliveredAt: timestamp("last_delivered_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("notification_channels_user_idx").on(t.userId),
     // One channel per target per user; re-adding the same URL is an edit.
-    uniqueIndex("notification_channels_target_idx").on(t.userId, t.kind, t.target),
+    uniqueIndex("notification_channels_target_idx").on(
+      t.userId,
+      t.kind,
+      t.target,
+    ),
   ],
 );
 
@@ -560,11 +710,16 @@ export const notificationDeliveries = pgTable(
     attempts: integer("attempts").notNull().default(0),
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
     error: text("error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     // The idempotency guarantee: one delivery per event per channel, ever.
-    uniqueIndex("notification_deliveries_unique_idx").on(t.eventId, t.channelId),
+    uniqueIndex("notification_deliveries_unique_idx").on(
+      t.eventId,
+      t.channelId,
+    ),
     index("notification_deliveries_pending_idx").on(t.status, t.createdAt),
   ],
 );
@@ -574,7 +729,10 @@ export const achievements = pgTable("achievements", {
   name: text("name").notNull(),
   description: text("description"),
   tier: smallint("tier").notNull().default(1),
-  predicate: jsonb("predicate").$type<Record<string, unknown>>().notNull().default({}),
+  predicate: jsonb("predicate")
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default({}),
 });
 
 export const userAchievements = pgTable(
@@ -586,22 +744,30 @@ export const userAchievements = pgTable(
     code: text("code")
       .notNull()
       .references(() => achievements.code, { onDelete: "cascade" }),
-    earnedAt: timestamp("earned_at", { withTimezone: true }).notNull().defaultNow(),
+    earnedAt: timestamp("earned_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.code] })],
 );
 
 /** Short-lived browser approval requests. Polling secrets are stored hashed. */
-export const devicePairings = pgTable("device_pairings", {
-  codeHash: text("code_hash").primaryKey(),
-  tokenHash: text("token_hash").notNull().unique(),
-  publicKey: text("public_key").notNull(),
-  label: text("label").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
-  decision: text("decision"),
-  deviceId: text("device_id").references(() => devices.id, { onDelete: "cascade" }),
-}, (t) => [index("device_pairings_expiry_idx").on(t.expiresAt)]);
+export const devicePairings = pgTable(
+  "device_pairings",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    publicKey: text("public_key").notNull(),
+    label: text("label").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    decision: text("decision"),
+    deviceId: text("device_id").references(() => devices.id, {
+      onDelete: "cascade",
+    }),
+  },
+  (t) => [index("device_pairings_expiry_idx").on(t.expiresAt)],
+);
 
 export const usersRelations = relations(users, ({ many }) => ({
   identities: many(identities),
@@ -617,15 +783,25 @@ export const devicesRelations = relations(devices, ({ one, many }) => ({
 
 /** Recoverable audit of explicit reader repairs; aggregates only, no keys. */
 export const usageBridgeSnapshots = pgTable("usage_bridge_snapshots", {
-  deviceId: text("device_id").primaryKey().references(() => devices.id, { onDelete: "cascade" }),
-  snapshot: jsonb("snapshot").$type<import("@usurp/protocol").BridgeSnapshot>().notNull(),
-  importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
+  deviceId: text("device_id")
+    .primaryKey()
+    .references(() => devices.id, { onDelete: "cascade" }),
+  snapshot: jsonb("snapshot")
+    .$type<import("@usurp/protocol").BridgeSnapshot>()
+    .notNull(),
+  importedAt: timestamp("imported_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const usageRepairBackups = pgTable("usage_repair_backups", {
   id: uuid("id").primaryKey().defaultRandom(),
-  deviceId: text("device_id").notNull().references(() => devices.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  deviceId: text("device_id")
+    .notNull()
+    .references(() => devices.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
   rows: jsonb("rows").$type<unknown[]>().notNull(),
 });
 
@@ -635,7 +811,10 @@ export const arenasRelations = relations(arenas, ({ many }) => ({
 }));
 
 export const arenaMembersRelations = relations(arenaMembers, ({ one }) => ({
-  arena: one(arenas, { fields: [arenaMembers.arenaId], references: [arenas.id] }),
+  arena: one(arenas, {
+    fields: [arenaMembers.arenaId],
+    references: [arenas.id],
+  }),
   user: one(users, { fields: [arenaMembers.userId], references: [users.id] }),
 }));
 

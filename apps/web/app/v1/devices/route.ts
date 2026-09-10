@@ -10,6 +10,12 @@ import { z } from "zod";
 import { PUBLIC_KEY_BYTES } from "@usurp/protocol";
 import { getDb, redeemEnrollment } from "@usurp/db";
 import { NextResponse } from "next/server";
+import {
+  bodyError,
+  limitRequest,
+  readJson,
+  reportError,
+} from "../../../lib/request";
 
 const bodySchema = z
   .object({
@@ -29,11 +35,13 @@ const bodySchema = z
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await limitRequest("device-register", "deployment", 120);
+  if (limited) return limited;
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    body = await readJson(request);
+  } catch (error) {
+    return bodyError(error);
   }
 
   const parsed = bodySchema.safeParse(body);
@@ -59,7 +67,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       parsed.data.label ? { label: parsed.data.label } : {},
     );
   } catch (err) {
-    console.error("device registration failed", err);
+    reportError("device-register");
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 

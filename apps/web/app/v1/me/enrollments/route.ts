@@ -14,6 +14,12 @@ import { ENROLLMENT_TTL_MS, getDb, issueEnrollment } from "@usurp/db";
 import { NextResponse } from "next/server";
 import { requireUser } from "../../../../lib/session";
 import { baseUrl } from "../../../../lib/env";
+import {
+  bodyError,
+  limitRequest,
+  readJson,
+  sameOrigin,
+} from "../../../../lib/request";
 
 export const dynamic = "force-dynamic";
 
@@ -22,18 +28,19 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: Request): Promise<NextResponse> {
+  if (!sameOrigin(request))
+    return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
   const auth = await requireUser();
   if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  const limited = await limitRequest("enrollment", auth.user.id, 10, 3600_000);
+  if (limited) return limited;
 
   // A body is optional; `label` is the only field.
   let body: unknown = {};
-  const raw = await request.text();
-  if (raw.length > 0) {
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      return NextResponse.json({ error: "invalid_json" }, { status: 400 });
-    }
+  try {
+    body = await readJson(request, 1024, true);
+  } catch (error) {
+    return bodyError(error);
   }
 
   const parsed = bodySchema.safeParse(body);

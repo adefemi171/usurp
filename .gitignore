@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 .next/
+.next-qa/
 .env
 .env.local
 .env.*

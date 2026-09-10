@@ -29,9 +29,12 @@ is a data migration), `#5` (a cut must be idempotent), `#6.1` (the recompute
 cannot run inside the ingest request). Ten notes in total; every one of them
 was a bug before it was a rule.
 
-Nothing below is aspirational. Where the spec still describes unbuilt work it
-says so: `#3.1` Codex, `#3.4` `org_verified` and shadow-freeze, `#5.4` shields
-and bounties, `#9` M4.
+Implementation update 2026-09-10: v1 includes native Codex/Cursor readers,
+optional AgentsView summaries, local browser-based Connect, GitHub/email access,
+manual imports, moderation, duels, private arenas and DNS-verified organizations.
+Authoritative `org_verified` usage remains disabled by owner decision until a
+consenting API organization and reliable attribution are available. Shields and
+bounties remain v2. ROADMAP.md contains only deferred work.
 
 ---
 
@@ -55,7 +58,7 @@ One entity: the **Arena**.
 | Type | Membership | Size | Verification | Default visibility |
 |---|---|---|---|---|
 | `global` | Auto-enrolled on opt-in | unbounded | signed CLI | `public` |
-| `org` | Email domain or Admin-API verified | unbounded | org-verified | **`hidden`** (opt-in per member) |
+| `org` | DNS-verified domain + verified work email + explicit consent | unbounded | signed CLI; authoritative gold disabled | **`hidden`** (opt-in per member) |
 | `club` | Invite code / link | ≤ 50 | signed CLI | `public` within club |
 
 Rules:
@@ -69,13 +72,16 @@ Rules:
 ## 3. Ingestion
 
 ### 3.1 Sources
-Reuse [AgentsView](https://github.com/kenn-io/agentsview)'s session readers — **MIT licensed** (verified), so vendoring with attribution is fine. It already covers 40+ agents and the awkward formats (`.pb`, Aider's per-repo Markdown).
+Built-in readers cover Claude Code, VS Code Copilot, Codex and Cursor. An optional
+AgentsView bridge imports its aggregate summaries as the preferred analytics
+source where coverage overlaps, without double-counting the native source.
+Usurp remains usable without AgentsView. Additional agents depend on bridge
+availability and source coverage, not invented native readers. Cursor model
+metadata without measured counters is shown as unavailable, not zero usage.
 
-- v1: Claude Code (`~/.claude/projects/*.jsonl`), **VS Code Copilot** (`…/User/workspaceStorage/*/chatSessions/*.jsonl`)
-- v1, still missing: Codex (`~/.codex/sessions/`)
-- v2: whatever AgentsView's readers give us for free
-
-Fallback if vendoring proves messy: `ccusage`-style parsing for Claude Code only (the path Viberank took). Ship v1 either way; keep the reader behind a `UsageReader` interface so the choice is reversible.
+Local browser-based Connect handles device pairing and recurring sync without
+cloning the repository. The advanced CLI remains available. Neither path sends
+prompts, code or project names to the hosted service.
 
 > **Amended 2026-09-09 — v1 gained Copilot before Codex, and the second reader
 > was not optional.**
@@ -214,19 +220,17 @@ Server-side plausibility gates on every submit:
   Imports use bounded batches and leave the incremental sync cursor unchanged.
 - Anomaly flag → shadow-freeze the user's rank pending review rather than hard-rejecting (false positives on a heavy user are worse than a slow cheat).
 
-> **Not built as of 2026-09-09**, stated plainly so this table is not read as a
-> description of what runs:
->
-> - **`org_verified`** exists as an enum value and nothing assigns it. The
->   draft's own parenthesis — *confirm endpoint + per-key attribution before
->   promising this* — is still unresolved, so the gold badge is unearnable and
->   must not be advertised.
-> - **Shadow-freeze** is half-wired: `review_state = 'shadow_frozen'` is
->   *read* by the board and the profile, which render the flag correctly, but
->   **no code path writes it.** The gates flag individual buckets; nothing
->   promotes a pattern of flags into a freeze. Until something does, the
->   anti-cheat story ends at per-bucket rejection.
-> - **`unverified`** (manual JSON upload) has no upload endpoint.
+> **Implemented 2026-09-10:** manual aggregate JSON imports are explicitly
+> unverified, historical and excluded from rating/duels. Valid signed data
+> supersedes overlapping manual data. Three distinct signed, non-historical
+> hours with implausible commit rates within 24 hours trigger an audited review
+> freeze. Pricing warnings alone never freeze anyone. Frozen users retain their
+> previous rating points, cannot contend for titles or start duels, and see an
+> explanation; their ordinal position may change as other players advance.
+> Operator review is available through `npm run review -- --handle HANDLE`;
+> applying a decision requires `--apply`, a reason and reviewer identity.
+> `org_verified` remains unearnable and its board filter disabled. DNS ownership
+> and verified work email prove membership, not authoritative usage.
 
 Gate order is load-bearing: resolve device → **verify signature** → check `seq` → run content gates → merge. Gating an unsigned payload tells you nothing about who sent it, and a replayed payload passes every content gate by construction, because it was valid the first time.
 
@@ -392,6 +396,13 @@ Because volume is log-scaled (10× the tokens = +10 points) while efficiency is 
 
 **Rate-limit the drama:** at most one `dethroned` notification per arena per hour, and duels capped at 2 concurrent per user. A board that pings all day gets muted, and a muted board is a dead board.
 
+Duels reserve both participants' available rating points, recheck membership and
+balances on acceptance, and preserve the originally agreed duration. Points
+windows begin at the next UTC midnight; commit/edit windows at the next whole
+hour. They must finish within the current season. End boundaries are exclusive.
+Settlement runs after daily-score refresh and is idempotent. Historical and
+unsigned imports do not count toward contested metrics.
+
 > **Amended 2026-09-09 — three details this section leaves implicit, each of
 > which was a bug before it was a rule.**
 >
@@ -498,7 +509,7 @@ GET  /v1/me                     profile, arenas, rating, trust tier
 PATCH/v1/me/arenas/:id          set visibility | leave
 GET  /v1/arenas/:slug/board     ?window=day|week|season|all &metric=rating|burn  (paginated)
 GET  /v1/arenas/:slug/feed      dethrones, duels, eliminations, achievements
-GET  /v1/arenas/:slug/stream    SSE: live rank deltas
+GET  /v1/arenas/:slug/stream    SSE: refresh invalidations, no private row payloads
 POST /v1/arenas                 create club → invite_code
 POST /v1/arenas/join            {invite_code}
 POST /v1/duels                  challenge
@@ -517,7 +528,7 @@ GET  /v1/orgs/:id/aggregate     admin: aggregates only, never per-member
 | Plugin | Claude Code plugin, `SessionEnd` hook | Zero-friction ingestion, no daemon |
 | API | Next.js App Router (or Fastify if the CLI-only surface grows) | One deploy for board + API |
 | DB | Postgres (Neon/Supabase) + Drizzle | AgentsView already pushes to Postgres — direct import path for existing users |
-| Auth | GitHub + Google OAuth | GitHub is the norm here and gives a free identity/avatar |
+| Auth | GitHub OAuth + verified email codes | Passwordless access; explicitly link identities to an existing account |
 | Realtime | `LISTEN/NOTIFY` → SSE | AgentsView uses SSE too; no websocket infra to run |
 | Jobs | pg-boss | Season rollover, daily decay, circle shrink, duel settlement |
 | Self-host | single `docker-compose.yml` | burnlog set this expectation; org buyers will ask |
@@ -530,7 +541,7 @@ GET  /v1/orgs/:id/aggregate     admin: aggregates only, never per-member
 - **M1 — Parity (wk 2).** OAuth, handles, visibility modes, clubs via invite code. *Usurp now matches ccclub.*
 - **M2 — Rating (wk 3).** Scoring engine, **simulation harness + ship gate (`#4.4`)**, decay, Throne/reign tracking, dethrone events, arena feed. *This is the differentiator — do not skip to M3.*
 - **M3 — Battle royale (wk 4).** Seasons, shrinking circles, duels, notifications (email / webhook / Slack), share cards.
-- **M4 — Org.** Domain verification, admin consent model, aggregate-only admin views, Admin-API cross-verification, Codex + remaining agents.
+- **M4 — Org.** Domain verification, explicit member consent and aggregate-only admin views implemented. Authoritative Admin-API cross-verification remains deferred. Native Codex/Cursor plus optional AgentsView cover coding tools without requiring AgentsView for core operation.
 
 ---
 
@@ -540,6 +551,22 @@ GET  /v1/orgs/:id/aggregate     admin: aggregates only, never per-member
 2. 100% opt-in; every arena independently leavable; account deletion purges `usage_events`.
 3. Org admins see aggregates only unless a member opts to be public in that arena.
 4. CLI open source (MIT); payload schema documented; whole app self-hostable.
+
+Private arena pages, feeds, streams, rankings and reigns require membership or
+ownership. Organization reports cover only the last completed UTC week, exclude
+pre-consent activity, and are withheld below five contributors. They contain no
+member-level breakdown. This threshold is not a formal differential-privacy
+guarantee. Members start hidden and must link a verified matching work email.
+
+Account deletion requires the exact handle and removes identities, sessions,
+devices, usage, bridge summaries and associated personal records transactionally.
+Shared arenas can remain for other members; deleted owners' domain claims are
+released. Encrypted backups expire under the deployment's retention policy.
+
+Cost provenance remains explicit: local reader estimates and AgentsView-reported
+cost are not invoices. Unknown usage is unavailable, never silently zero. Refresh
+reimports the selected source; it must not retroactively rewrite historical costs
+using today's prices. Actual provider billing integrations remain deferred.
 
 ---
 

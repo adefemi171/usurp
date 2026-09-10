@@ -15,6 +15,12 @@
 import { payloadSchema } from "@usurp/protocol";
 import { getDb, ingest } from "@usurp/db";
 import { NextResponse } from "next/server";
+import {
+  bodyError,
+  limitRequest,
+  readJson,
+  reportError,
+} from "../../../lib/request";
 
 /** Reject oversized bodies before parsing. 2000 buckets is roughly 700KB. */
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -22,19 +28,24 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await limitRequest("ingest", "deployment", 3000);
+  if (limited) return limited;
   const declared = request.headers.get("content-length");
   if (declared && Number(declared) > MAX_BODY_BYTES) {
     return NextResponse.json(
-      { error: "payload_too_large", detail: `body exceeds ${MAX_BODY_BYTES} bytes` },
+      {
+        error: "payload_too_large",
+        detail: `body exceeds ${MAX_BODY_BYTES} bytes`,
+      },
       { status: 413 },
     );
   }
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    body = await readJson(request, MAX_BODY_BYTES);
+  } catch (error) {
+    return bodyError(error);
   }
 
   const parsed = payloadSchema.safeParse(body);
@@ -57,7 +68,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     result = await ingest(getDb(), parsed.data);
   } catch (err) {
-    console.error("ingest failed", err);
+    reportError("ingest");
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 

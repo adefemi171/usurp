@@ -12,9 +12,16 @@ import {
   membershipsFor,
   HANDLE_MAX,
   HANDLE_MIN,
+  deleteAccount,
 } from "@usurp/db";
 import { NextResponse } from "next/server";
-import { requireUser } from "../../../lib/session";
+import { clearSessionCookie, requireUser } from "../../../lib/session";
+import {
+  bodyError,
+  limitRequest,
+  readJson,
+  sameOrigin,
+} from "../../../lib/request";
 
 export const dynamic = "force-dynamic";
 
@@ -90,14 +97,18 @@ const HANDLE_MESSAGES: Record<string, string> = {
 };
 
 export async function PATCH(request: Request): Promise<NextResponse> {
+  if (!sameOrigin(request))
+    return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
   const auth = await requireUser();
   if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  const limited = await limitRequest("profile-update", auth.user.id, 10);
+  if (limited) return limited;
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    body = await readJson(request, 1024);
+  } catch (error) {
+    return bodyError(error);
   }
 
   const parsed = patchSchema.safeParse(body);
@@ -125,7 +136,8 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     return NextResponse.json(
       {
         error: result.rejection,
-        detail: HANDLE_MESSAGES[result.rejection] ?? "That handle cannot be used.",
+        detail:
+          HANDLE_MESSAGES[result.rejection] ?? "That handle cannot be used.",
       },
       { status },
     );
@@ -137,14 +149,36 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   });
 }
 
-/** `DELETE /v1/me` is deliberately absent — see `#10.2` in ROADMAP.md. */
-export async function DELETE(): Promise<NextResponse> {
-  return NextResponse.json(
-    {
-      error: "not_implemented",
-      detail:
-        "Account deletion must purge usage_events per SPEC.md#10.2 and is not built yet. Tracked in ROADMAP.md.",
-    },
-    { status: 501 },
+export async function DELETE(request: Request): Promise<NextResponse> {
+  if (!sameOrigin(request))
+    return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
+  const auth = await requireUser();
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  const limited = await limitRequest("account-delete", auth.user.id, 5);
+  if (limited) return limited;
+  let body;
+  try {
+    body = await readJson(request, 1024);
+  } catch (error) {
+    return bodyError(error);
+  }
+  const parsed = z
+    .object({ confirmation: z.string().max(32) })
+    .strict()
+    .safeParse(body);
+  if (
+    !parsed.success ||
+    !(await deleteAccount(getDb(), auth.user.id, parsed.data.confirmation))
+  ) {
+    return NextResponse.json(
+      { error: "Type your exact handle to confirm deletion." },
+      { status: 400 },
+    );
+  }
+  const response = NextResponse.json(
+    { deleted: true },
+    { headers: { "cache-control": "no-store" } },
   );
+  clearSessionCookie(response);
+  return response;
 }

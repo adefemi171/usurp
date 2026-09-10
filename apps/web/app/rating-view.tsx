@@ -10,10 +10,17 @@
  * the board "the hottest read path".
  */
 
-import { formatDuration, getDb, ratingBoard, TITLES, type BoardTitle } from "@usurp/db";
+import {
+  formatDuration,
+  getDb,
+  ratingBoard,
+  TITLES,
+  type BoardTitle,
+} from "@usurp/db";
 import InvitePrompt from "./invite-prompt";
 import Avatar from "./avatar";
 import { currentUser } from "../lib/session";
+import type { TrustFilter } from "./board-nav";
 
 function usd(points: number): string {
   return points.toLocaleString();
@@ -45,10 +52,17 @@ function daysLeft(endsAt: Date): number {
   return Math.max(0, Math.ceil((endsAt.getTime() - Date.now()) / 86_400_000));
 }
 
-export default async function RatingView({ slug }: { slug: string }) {
+export default async function RatingView({
+  slug,
+  trust,
+}: {
+  slug: string;
+  trust?: TrustFilter;
+}) {
   const viewer = await currentUser();
   const board = await ratingBoard(getDb(), slug, {
     limit: 100,
+    trust,
     ...(viewer ? { viewerId: viewer.id } : {}),
   });
 
@@ -117,90 +131,128 @@ export default async function RatingView({ slug }: { slug: string }) {
             Ratings are rebuilt from synced usage. If you have synced, the
             recompute may not have run yet:
           </p>
-          <pre>
-            <code>npm run recompute</code>
-          </pre>
+          <p>
+            The hosted worker normally updates ratings every ten minutes while
+            the service is awake. Historical and manual imports remain
+            analytics-only.
+          </p>
         </div>
       ) : (
-        <div className="table-scroll" role="region" aria-label="Rating standings" tabIndex={0}><table className="board">
-          <thead>
-            <tr>
-              <th scope="col">#</th>
-              <th scope="col">Title</th>
-              <th scope="col">Who</th>
-              <th scope="col">Points</th>
-              <th scope="col">Moved</th>
-            </tr>
-          </thead>
-          <tbody>
-            {board.rows.map((row) => (
-              <tr
-                key={`${row.rank}-${row.handle ?? row.pseudonym}`}
-                className={[
-                  row.title === "sovereign" ? "throne" : "",
-                  row.rank <= 3 && !row.eliminated ? "top3" : "",
-                  // `#5.2` — "greyed as out". Still listed, still accruing.
-                  row.eliminated ? "eliminated" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ") || undefined}
-              >
-                <td className="rank">{row.rank}</td>
-                <td>
-                  {row.eliminated && (
-                    <span className="badge out" title="Eliminated from title contention this season. Still accruing.">
-                      out
-                    </span>
-                  )}
-                  <TitleBadge title={row.title} />
-                  {row.title === "sovereign" && board.throne && (
-                    <span className="held" title={`Since ${board.throne.startedAt.toISOString()}`}>
-                      held {formatDuration(board.throne.heldSeconds)}
-                    </span>
-                  )}
-                </td>
-                <td className="who">
-                  <span className="who-cell">
-                    {/* Top three get a larger avatar — the only place the
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="Rating standings"
+          tabIndex={0}
+        >
+          <table className="board">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Title</th>
+                <th scope="col">Who</th>
+                <th scope="col">Points</th>
+                <th scope="col">Moved</th>
+                <th scope="col">Trust</th>
+              </tr>
+            </thead>
+            <tbody>
+              {board.rows.map((row) => (
+                <tr
+                  key={`${row.rank}-${row.handle ?? row.pseudonym}`}
+                  className={
+                    [
+                      row.title === "sovereign" ? "throne" : "",
+                      row.rank <= 3 && !row.eliminated ? "top3" : "",
+                      // `#5.2` — "greyed as out". Still listed, still accruing.
+                      row.eliminated ? "eliminated" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ") || undefined
+                  }
+                >
+                  <td className="rank">{row.rank}</td>
+                  <td>
+                    {row.eliminated && (
+                      <span
+                        className="badge out"
+                        title="Eliminated from title contention this season. Still accruing."
+                      >
+                        out
+                      </span>
+                    )}
+                    <TitleBadge title={row.title} />
+                    {row.title === "sovereign" && board.throne && (
+                      <span
+                        className="held"
+                        title={`Since ${board.throne.startedAt.toISOString()}`}
+                      >
+                        held {formatDuration(board.throne.heldSeconds)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="who">
+                    <span className="who-cell">
+                      {/* Top three get a larger avatar — the only place the
                         board leans on hierarchy, and only on rating, where a
                         position is earned rather than bought. */}
-                    <Avatar
-                      url={row.avatarUrl}
-                      name={row.handle ?? row.pseudonym ?? "?"}
-                      size={row.rank <= 3 ? 34 : 26}
-                    />
-                    {row.pseudonym ? (
-                      <span className="anon">{row.pseudonym}</span>
-                    ) : (
-                      // The handle, not the display name: it is the canonical
-                      // identity, it is what `/u/<handle>` resolves, and
-                      // showing one while linking to the other invites "who is
-                      // this?" every time someone sets a display name.
-                      <a className="who-link" href={`/u/${encodeURIComponent(row.handle!)}`}>
-                        {row.handle}
-                      </a>
-                    )}
-                  </span>
-                </td>
-                <td className="num">{usd(row.points)}</td>
-                <td className="num">{movement(row.prevRank === null ? null : row.movement)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
+                      <Avatar
+                        url={row.avatarUrl}
+                        name={row.handle ?? row.pseudonym ?? "?"}
+                        size={row.rank <= 3 ? 34 : 26}
+                      />
+                      {row.pseudonym ? (
+                        <span className="anon">{row.pseudonym}</span>
+                      ) : (
+                        // The handle, not the display name: it is the canonical
+                        // identity, it is what `/u/<handle>` resolves, and
+                        // showing one while linking to the other invites "who is
+                        // this?" every time someone sets a display name.
+                        <a
+                          className="who-link"
+                          href={`/u/${encodeURIComponent(row.handle!)}`}
+                        >
+                          {row.handle}
+                        </a>
+                      )}
+                    </span>
+                  </td>
+                  <td className="num">{usd(row.points)}</td>
+                  <td className="num">
+                    {movement(row.prevRank === null ? null : row.movement)}
+                  </td>
+                  <td>
+                    <span
+                      className={row.underReview ? "badge flagged" : "badge"}
+                    >
+                      {row.underReview
+                        ? "Under review"
+                        : row.trustTier.replaceAll("_", " ")}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <footer>
         <p>
-          <strong>Points</strong> are{" "}
-          <code>volume × efficiency × streak</code>, with volume log-scaled so
-          10x the tokens is only +10 points. Seasonal points decay 5% for every
-          day you are inactive — standing still is falling.
+          Applied and reverted edits depend on what each tool records. Claude
+          Code reversions are inferred from declined or failed edits; Copilot
+          records explicit undo events. Missing telemetry is not treated as
+          failure.
         </p>
         <p>
-          The <strong>Sovereign</strong> holds the Throne and loses it the moment
-          someone plays better. The <strong>Usurper</strong> is next in line,
-          waiting for exactly that.
+          <strong>Points</strong> are <code>volume × efficiency × streak</code>,
+          with volume log-scaled so 10x the tokens is only +10 points. Seasonal
+          points decay 5% for every day you are inactive — standing still is
+          falling.
+        </p>
+        <p>
+          The <strong>Sovereign</strong> holds the Throne and loses it the
+          moment someone plays better. The <strong>Usurper</strong> is next in
+          line, waiting for exactly that.
         </p>
       </footer>
     </>

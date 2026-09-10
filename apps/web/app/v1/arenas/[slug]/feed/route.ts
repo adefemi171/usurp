@@ -11,6 +11,8 @@
 import { z } from "zod";
 import { arenaFeed, getDb } from "@usurp/db";
 import { NextResponse } from "next/server";
+import { currentUser } from "../../../../../lib/session";
+import { canViewArena } from "../../../../../lib/arena-access";
 
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
@@ -25,6 +27,8 @@ export async function GET(
   context: { params: Promise<{ slug: string }> },
 ): Promise<NextResponse> {
   const { slug } = await context.params;
+  if (!(await canViewArena(slug, (await currentUser())?.id)))
+    return NextResponse.json({ error: "arena_not_found" }, { status: 404 });
   const url = new URL(request.url);
 
   const parsed = querySchema.safeParse(Object.fromEntries(url.searchParams));

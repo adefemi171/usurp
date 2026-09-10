@@ -22,13 +22,21 @@ import {
   type IngestPayload,
 } from "@usurp/protocol";
 import type { Db } from "./client.js";
-import { devices, usageEvents, usageRepairBackups, usageBridgeSnapshots } from "./schema.js";
+import { reviewSuspiciousUsage } from "./review.js";
+import {
+  devices,
+  usageEvents,
+  usageRepairBackups,
+  usageBridgeSnapshots,
+} from "./schema.js";
 
 export type IngestFailure =
   | "unknown_device"
   | "device_revoked"
   | "bad_signature"
-  | "stale_seq" | "stale_reader" | "invalid_repair";
+  | "stale_seq"
+  | "stale_reader"
+  | "invalid_repair";
 
 export interface IngestRejection {
   bucketIndex: number;
@@ -101,7 +109,9 @@ export async function ingest(
   const now = options.now ?? new Date();
 
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${deviceLockKey(payload.device_id)})`);
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${deviceLockKey(payload.device_id)})`,
+    );
 
     const [device] = await tx
       .select()
@@ -123,8 +133,17 @@ export async function ingest(
       // *expected* to be unsigned. A batch that claims a device and fails its
       // key is a forgery attempt, and storing it would let an attacker write to
       // another user's counters simply by being wrong.
-      return fail("bad_signature", "signature does not verify against the device key");
+      return fail(
+        "bad_signature",
+        "signature does not verify against the device key",
+      );
     }
+
+    // Serialize against unsigned imports. A measured native bucket supersedes
+    // manual analytics for the same scope; importing first must not double it.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`manual_${device.userId}`},0))`,
+    );
 
     // ── Replay protection. `#3.4`'s monotonic per-device counter. ──
     if (payload.seq <= device.lastSeq) {
@@ -137,29 +156,78 @@ export async function ingest(
       };
     }
 
-    if (device.installationId && !payload.installation_id) return fail("stale_reader", "Update Connect: this device now requires installation-aware syncing.");
-    if (device.installationId && payload.installation_id && device.installationId !== payload.installation_id) {
-      return fail("invalid_repair", "This device is bound to another installation. Enroll this computer separately.");
+    if (device.installationId && !payload.installation_id)
+      return fail(
+        "stale_reader",
+        "Update Connect: this device now requires installation-aware syncing.",
+      );
+    if (
+      device.installationId &&
+      payload.installation_id &&
+      device.installationId !== payload.installation_id
+    ) {
+      return fail(
+        "invalid_repair",
+        "This device is bound to another installation. Enroll this computer separately.",
+      );
     }
-    if (payload.bridge?.sourceId?.startsWith("agentsview:installation:") &&
-        !payload.bridge.sourceId.startsWith(`agentsview:installation:${payload.installation_id}:`)) {
-      return fail("invalid_repair", "Bridge source must match the signed installation identity.");
+    if (
+      payload.bridge?.sourceId?.startsWith("agentsview:installation:") &&
+      !payload.bridge.sourceId.startsWith(
+        `agentsview:installation:${payload.installation_id}:`,
+      )
+    ) {
+      return fail(
+        "invalid_repair",
+        "Bridge source must match the signed installation identity.",
+      );
     }
     if (payload.installation_id && !device.installationId) {
-      await tx.update(devices).set({ installationId: payload.installation_id }).where(eq(devices.id, device.id));
+      await tx
+        .update(devices)
+        .set({ installationId: payload.installation_id })
+        .where(eq(devices.id, device.id));
     }
-    if (payload.installation_id) await tx.execute(sql`SELECT pg_advisory_xact_lock(${deviceLockKey(`installation:${device.userId}:${payload.installation_id}`)})`);
-    if (payload.bridge) await tx.execute(sql`SELECT pg_advisory_xact_lock(${deviceLockKey(`bridge:${device.userId}`)})`);
+    if (payload.installation_id)
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${deviceLockKey(`installation:${device.userId}:${payload.installation_id}`)})`,
+      );
+    if (payload.bridge)
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${deviceLockKey(`bridge:${device.userId}`)})`,
+      );
 
     if ((payload.reader_revision ?? 1) < device.usageRevision) {
-      return fail("stale_reader", "Update your CLI: this device has repaired usage accounting and cannot accept older readers.");
+      return fail(
+        "stale_reader",
+        "Update your CLI: this device has repaired usage accounting and cannot accept older readers.",
+      );
     }
-    if (!payload.buckets.length && !payload.bridge) return fail("invalid_repair", "Empty submissions require a bridge snapshot.");
-    if (payload.bridge && (Date.parse(payload.bridge.fetchedAt) > +now + 300_000 ||
-      Date.parse(payload.bridge.fetchedAt) < +now - 3600_000)) return fail("invalid_repair", "Bridge snapshot must be freshly imported.");
-    if (payload.replace_agents && (payload.reader_revision !== 2 ||
-      payload.replace_agents.some(agent => !payload.buckets.some(b => b.agent === agent)))) {
-      return fail("invalid_repair", "Repair requires revision 2 and a nonempty full snapshot for each selected agent.");
+    if (!payload.buckets.length && !payload.bridge)
+      return fail(
+        "invalid_repair",
+        "Empty submissions require a bridge snapshot.",
+      );
+    if (
+      payload.bridge &&
+      (Date.parse(payload.bridge.fetchedAt) > +now + 300_000 ||
+        Date.parse(payload.bridge.fetchedAt) < +now - 3600_000)
+    )
+      return fail(
+        "invalid_repair",
+        "Bridge snapshot must be freshly imported.",
+      );
+    if (
+      payload.replace_agents &&
+      (payload.reader_revision !== 2 ||
+        payload.replace_agents.some(
+          (agent) => !payload.buckets.some((b) => b.agent === agent),
+        ))
+    ) {
+      return fail(
+        "invalid_repair",
+        "Repair requires revision 2 and a nonempty full snapshot for each selected agent.",
+      );
     }
 
     const gated = runGates(payload, { now });
@@ -167,20 +235,50 @@ export async function ingest(
       gated.rejects.filter((v) => v.bucketIndex >= 0).map((v) => v.bucketIndex),
     );
 
-    if (!gated.rejects.some(v => v.bucketIndex < 0) && payload.bridge?.sourceId?.startsWith("agentsview:installation:")) {
-      const [previous] = await tx.select().from(usageBridgeSnapshots).where(eq(usageBridgeSnapshots.deviceId, device.id));
+    if (
+      !gated.rejects.some((v) => v.bucketIndex < 0) &&
+      payload.bridge?.sourceId?.startsWith("agentsview:installation:")
+    ) {
+      const [previous] = await tx
+        .select()
+        .from(usageBridgeSnapshots)
+        .where(eq(usageBridgeSnapshots.deviceId, device.id));
       // Preserve the previously deduplicated legacy group during an upgrade.
       // A fresh laptop has no previous snapshot and cannot adopt another group.
-      if (previous && !previous.snapshot.sourceId?.startsWith("agentsview:installation:")) {
+      if (
+        previous &&
+        !previous.snapshot.sourceId?.startsWith("agentsview:installation:")
+      ) {
         const source = previous.snapshot.sourceId;
-        const owned = await tx.select({ id: usageBridgeSnapshots.deviceId, snapshot: usageBridgeSnapshots.snapshot, revokedAt: devices.revokedAt, installationId: devices.installationId })
-          .from(usageBridgeSnapshots).innerJoin(devices, eq(devices.id, usageBridgeSnapshots.deviceId)).where(eq(devices.userId, device.userId));
-        for (const old of owned) if (!old.snapshot.sourceId || old.snapshot.sourceId === source) {
-          await tx.update(usageBridgeSnapshots).set({ snapshot: { ...old.snapshot, sourceId: payload.bridge.sourceId } }).where(eq(usageBridgeSnapshots.deviceId, old.id));
-          // Retired registrations in that same legacy group retain their native
-          // deduplication boundary too. Active laptops acquire their own ID.
-          if (old.revokedAt && !old.installationId) await tx.update(devices).set({ installationId: payload.installation_id }).where(eq(devices.id, old.id));
-        }
+        const owned = await tx
+          .select({
+            id: usageBridgeSnapshots.deviceId,
+            snapshot: usageBridgeSnapshots.snapshot,
+            revokedAt: devices.revokedAt,
+            installationId: devices.installationId,
+          })
+          .from(usageBridgeSnapshots)
+          .innerJoin(devices, eq(devices.id, usageBridgeSnapshots.deviceId))
+          .where(eq(devices.userId, device.userId));
+        for (const old of owned)
+          if (!old.snapshot.sourceId || old.snapshot.sourceId === source) {
+            await tx
+              .update(usageBridgeSnapshots)
+              .set({
+                snapshot: {
+                  ...old.snapshot,
+                  sourceId: payload.bridge.sourceId,
+                },
+              })
+              .where(eq(usageBridgeSnapshots.deviceId, old.id));
+            // Retired registrations in that same legacy group retain their native
+            // deduplication boundary too. Active laptops acquire their own ID.
+            if (old.revokedAt && !old.installationId)
+              await tx
+                .update(devices)
+                .set({ installationId: payload.installation_id })
+                .where(eq(devices.id, old.id));
+          }
       }
     }
 
@@ -222,19 +320,54 @@ export async function ingest(
     if (suspectIndexes.length > 0) {
       // One round trip for the whole batch, rather than one cross-region query
       // per hour. Match the same (hour, agent, model) scope as the old lookup.
-      const clashes = await tx.select({ deviceId: usageEvents.deviceId,
-        hour: usageEvents.hour, agent: usageEvents.agent, model: usageEvents.model })
-        .from(usageEvents).innerJoin(devices, eq(usageEvents.deviceId, devices.id)).where(and(eq(usageEvents.userId, device.userId),
-          // Known distinct installations can have genuine overlapping history.
-          // Old clients retain their legacy guard; identified clients must not
-          // discard another laptop's history on the basis of an unknown identity.
-          ...((payload.installation_id ?? device.installationId) ? [eq(devices.installationId, (payload.installation_id ?? device.installationId)!)] : []),
-          ne(usageEvents.deviceId, device.id), or(...suspectIndexes.map(({ bucket }) =>
-            and(eq(usageEvents.hour, new Date(bucket.hour)), eq(usageEvents.agent, bucket.agent), eq(usageEvents.model, bucket.model))))));
-      const clashKey = (hour: Date, agent: string, model: string) => JSON.stringify([hour.toISOString(), agent, model]);
-      const byBucket = new Map(clashes.map(clash => [clashKey(clash.hour, clash.agent, clash.model), clash]));
+      const clashes = await tx
+        .select({
+          deviceId: usageEvents.deviceId,
+          hour: usageEvents.hour,
+          agent: usageEvents.agent,
+          model: usageEvents.model,
+        })
+        .from(usageEvents)
+        .innerJoin(devices, eq(usageEvents.deviceId, devices.id))
+        .where(
+          and(
+            eq(usageEvents.userId, device.userId),
+            // Known distinct installations can have genuine overlapping history.
+            // Old clients retain their legacy guard; identified clients must not
+            // discard another laptop's history on the basis of an unknown identity.
+            ...((payload.installation_id ?? device.installationId)
+              ? [
+                  eq(
+                    devices.installationId,
+                    (payload.installation_id ?? device.installationId)!,
+                  ),
+                ]
+              : []),
+            eq(usageEvents.sigOk, true),
+            ne(usageEvents.deviceId, device.id),
+            or(
+              ...suspectIndexes.map(({ bucket }) =>
+                and(
+                  eq(usageEvents.hour, new Date(bucket.hour)),
+                  eq(usageEvents.agent, bucket.agent),
+                  eq(usageEvents.model, bucket.model),
+                ),
+              ),
+            ),
+          ),
+        );
+      const clashKey = (hour: Date, agent: string, model: string) =>
+        JSON.stringify([hour.toISOString(), agent, model]);
+      const byBucket = new Map(
+        clashes.map((clash) => [
+          clashKey(clash.hour, clash.agent, clash.model),
+          clash,
+        ]),
+      );
       for (const { bucket, index } of suspectIndexes) {
-        const clash = byBucket.get(clashKey(new Date(bucket.hour), bucket.agent, bucket.model));
+        const clash = byBucket.get(
+          clashKey(new Date(bucket.hour), bucket.agent, bucket.model),
+        );
 
         if (clash) {
           rejectedIndexes.add(index);
@@ -269,12 +402,24 @@ export async function ingest(
 
     if (payload.replace_agents) {
       // All-or-nothing: never erase old history if ANY replacement was refused.
-      if (rejectedIndexes.size) return fail("invalid_repair", "Repair aborted: replacement buckets failed validation; no data was changed.");
-      const scope = and(eq(usageEvents.deviceId, device.id), inArray(usageEvents.agent, payload.replace_agents));
+      if (rejectedIndexes.size)
+        return fail(
+          "invalid_repair",
+          "Repair aborted: replacement buckets failed validation; no data was changed.",
+        );
+      const scope = and(
+        eq(usageEvents.deviceId, device.id),
+        inArray(usageEvents.agent, payload.replace_agents),
+      );
       const previous = await tx.select().from(usageEvents).where(scope);
-      await tx.insert(usageRepairBackups).values({ deviceId: device.id, rows: previous });
+      await tx
+        .insert(usageRepairBackups)
+        .values({ deviceId: device.id, rows: previous });
       await tx.delete(usageEvents).where(scope);
-      await tx.update(devices).set({ usageRevision: 2 }).where(eq(devices.id, device.id));
+      await tx
+        .update(devices)
+        .set({ usageRevision: 2 })
+        .where(eq(devices.id, device.id));
     }
 
     const rows: (typeof usageEvents.$inferInsert)[] = [];
@@ -282,33 +427,53 @@ export async function ingest(
       if (rejectedIndexes.has(index)) continue;
 
       rows.push({
-          userId: device.userId,
-          deviceId: device.id,
-          agent: bucket.agent,
-          model: bucket.model,
-          historical: bucket.historical ?? false,
-          hour: new Date(bucket.hour),
-          inputTokens: bucket.input_tokens,
-          outputTokens: bucket.output_tokens,
-          cacheWriteTokens: bucket.cache_write_tokens,
-          cacheReadTokens: bucket.cache_read_tokens,
-          calls: bucket.calls,
-          sessionsStarted: bucket.sessions_started,
-          sessionsCompleted: bucket.sessions_completed,
-          sessionsAbandoned: bucket.sessions_abandoned,
-          editsApplied: bucket.edits_applied,
-          editsReverted: bucket.edits_reverted,
-          commits: bucket.commits,
-          costMicros: bucket.cost_micros,
-          dedupeKey: bucket.dedupe_key,
-          sigOk: true,
-          flags: flagsByIndex.get(index) ?? [],
-          submittedAt: now,
-          updatedAt: now,
-        });
+        userId: device.userId,
+        deviceId: device.id,
+        agent: bucket.agent,
+        model: bucket.model,
+        historical: bucket.historical ?? false,
+        hour: new Date(bucket.hour),
+        inputTokens: bucket.input_tokens,
+        outputTokens: bucket.output_tokens,
+        cacheWriteTokens: bucket.cache_write_tokens,
+        cacheReadTokens: bucket.cache_read_tokens,
+        calls: bucket.calls,
+        sessionsStarted: bucket.sessions_started,
+        sessionsCompleted: bucket.sessions_completed,
+        sessionsAbandoned: bucket.sessions_abandoned,
+        editsApplied: bucket.edits_applied,
+        editsReverted: bucket.edits_reverted,
+        commits: bucket.commits,
+        costMicros: bucket.cost_micros,
+        dedupeKey: bucket.dedupe_key,
+        sigOk: true,
+        flags: flagsByIndex.get(index) ?? [],
+        submittedAt: now,
+        updatedAt: now,
+      });
     }
     const upsert = async (batch: (typeof usageEvents.$inferInsert)[]) => {
-      await tx.insert(usageEvents).values(batch)
+      await tx
+        .delete(usageEvents)
+        .where(
+          and(
+            eq(usageEvents.userId, device.userId),
+            eq(usageEvents.deviceId, `manual_${device.userId}`),
+            eq(usageEvents.sigOk, false),
+            or(
+              ...batch.map((row) =>
+                and(
+                  eq(usageEvents.hour, row.hour),
+                  eq(usageEvents.agent, row.agent),
+                  eq(usageEvents.model, row.model),
+                ),
+              ),
+            ),
+          ),
+        );
+      await tx
+        .insert(usageEvents)
+        .values(batch)
         /**
          * `GREATEST`, not `DO NOTHING` and not overwrite.
          *
@@ -344,7 +509,6 @@ export async function ingest(
             updatedAt: sql`excluded.updated_at`,
           },
         });
-
     };
     // Bound parameter counts. Repeated keys are flushed in original order so
     // max-merge and last-write flags keep their prior semantics; PostgreSQL
@@ -353,16 +517,31 @@ export async function ingest(
     const keys = new Set<string>();
     for (const row of rows) {
       if (batch.length === 200 || keys.has(row.dedupeKey)) {
-        await upsert(batch); batch = []; keys.clear();
+        await upsert(batch);
+        batch = [];
+        keys.clear();
       }
-      batch.push(row); keys.add(row.dedupeKey);
+      batch.push(row);
+      keys.add(row.dedupeKey);
     }
     if (batch.length) await upsert(batch);
+    if (rows.some((row) => row.flags?.includes("commits_per_hour_exceeded"))) {
+      await reviewSuspiciousUsage(tx as unknown as Db, device.userId, now);
+    }
 
-    if (payload.bridge) await tx.insert(usageBridgeSnapshots).values({ deviceId: device.id, snapshot: payload.bridge, importedAt: now })
-      .onConflictDoUpdate({ target: usageBridgeSnapshots.deviceId,
-        set: { snapshot: payload.bridge, importedAt: now },
-        setWhere: sql`(${usageBridgeSnapshots.snapshot}->>'fetchedAt')::timestamptz <= ${payload.bridge.fetchedAt}::timestamptz` });
+    if (payload.bridge)
+      await tx
+        .insert(usageBridgeSnapshots)
+        .values({
+          deviceId: device.id,
+          snapshot: payload.bridge,
+          importedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: usageBridgeSnapshots.deviceId,
+          set: { snapshot: payload.bridge, importedAt: now },
+          setWhere: sql`(${usageBridgeSnapshots.snapshot}->>'fetchedAt')::timestamptz <= ${payload.bridge.fetchedAt}::timestamptz`,
+        });
 
     await tx
       .update(devices)
