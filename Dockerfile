@@ -72,7 +72,7 @@ COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 
 COPY --from=build /app/apps/web/.next ./apps/web/.next
 COPY --from=build /app/apps/web/public ./apps/web/public
-COPY --from=build /app/apps/web/next.config.ts ./apps/web/
+COPY --from=build /app/apps/web/next.config.mjs ./apps/web/
 COPY --from=build /app/scripts ./scripts
 
 # `node` (uid 1000) ships with the base image. Running as root would also make
