@@ -23,9 +23,9 @@ import {
   redeemEnrollment,
   upsertUserByHandle,
 } from "./enrollment.js";
-import { arenaMembers, arenas, users } from "./schema.js";
+import { arenaMembers, arenas, users, usageEvents } from "./schema.js";
 import { joinGlobalArena } from "./seed.js";
-import { derivedSignals, userProfile } from "./profile.js";
+import { derivedSignals, userDashboard, userProfile } from "./profile.js";
 import { burnBoard } from "./board.js";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
@@ -267,6 +267,71 @@ describe.skipIf(!hasDb)("userProfile", () => {
   });
 
   describe("aggregation", () => {
+    it("Burn's joined totals match native counters and preserve empty-window members", async () => {
+      await submit([bucket(), bucket({ agent: "cursor" })], 1);
+      const profile = (await userProfile(db, handle, { window: "all", now: NOW }))!;
+      const board = await burnBoard(db, "global", { window: "all", limit: 200 });
+      expect(board?.rows.find(r => r.handle === handle)).toMatchObject({
+        effectiveTokens: profile.totals.effectiveTokens,
+        inputTokens: profile.totals.inputTokens,
+        outputTokens: profile.totals.outputTokens,
+        cacheWriteTokens: profile.totals.cacheWriteTokens,
+        cacheReadTokens: profile.totals.cacheReadTokens,
+        costMicros: profile.totals.costMicros,
+        calls: profile.totals.calls,
+        trustTier: "cli_signed",
+      });
+      const empty = await burnBoard(db, "global", {
+        window: "day", now: new Date("2026-09-20Z"), limit: 200, trust: "cli_signed",
+      });
+      expect(empty?.rows.find(r => r.handle === handle)).toMatchObject({
+        effectiveTokens: 0, calls: 0, flagged: false, trustTier: "cli_signed",
+      });
+    });
+
+    it("Burn preserves signature trust and excludes hidden/left members after combining reads", async () => {
+      await submit([bucket()], 1);
+      await db.update(usageEvents).set({ sigOk: false }).where(eq(usageEvents.userId, userId));
+      const read = () => burnBoard(db, "global", { window: "all", limit: 200 });
+      const initial = (await read())!;
+      expect(initial.rows.find(r => r.handle === handle)?.trustTier).toBe("unverified");
+      await setVisibility("anonymous");
+      const anonymous = (await read())!;
+      expect(JSON.stringify(anonymous)).not.toContain(handle);
+      expect(anonymous.memberCount).toBe(initial.memberCount);
+      await setVisibility("hidden");
+      const hidden = (await read())!;
+      expect(hidden.total).toBe(initial.total - 1);
+      expect(hidden.memberCount).toBe(initial.memberCount);
+      await db.update(arenaMembers).set({ status: "left" }).where(eq(arenaMembers.userId, userId));
+      expect((await read())?.memberCount).toBe(initial.memberCount - 1);
+    });
+    it.each(["all", "day", "week", "month"] as const)(
+      "dashboard projection matches the full daily profile for %s",
+      async (window) => {
+        await submit([
+          bucket(), bucket({ agent: "cursor" }),
+          bucket({ hour: "2026-09-07T12:00:00Z" }),
+          bucket({ hour: "2026-05-05T13:00:00Z", historical: true, model: "unknown", cost_micros: 0 }),
+        ], 1);
+        const full = (await userProfile(db, handle, { window, now: NOW, dailyAnalytics: true }))!;
+        const { byModel, byDay, byAgent, byModelAgent, ...expected } = full;
+        expect(await userDashboard(db, handle, { window, now: NOW })).toEqual(expected);
+      },
+    );
+
+    it.each(["hidden", "anonymous"] as const)(
+      "dashboard keeps %s usage owner-only and rechecks visibility each time",
+      async (visibility) => {
+        await submit([bucket()], 1);
+        expect(await userDashboard(db, handle)).toBeDefined();
+        await setVisibility(visibility);
+        expect(await userDashboard(db, handle)).toBeUndefined();
+        expect(await userDashboard(db, handle, { viewerId: "stranger" })).toBeUndefined();
+        expect(await userDashboard(db, handle, { viewerId: userId, window: "all" }))
+          .toMatchObject({ handle, totals: { calls: 5 } });
+      },
+    );
     it("keeps provider real names out of profiles and Burn payloads", async () => {
       await db
         .update(users)

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { efficiencyFeedback, getDb, userProfile, type BoardWindow } from "@usurp/db";
+import { efficiencyFeedback, getDb, userDashboard, type BoardWindow } from "@usurp/db";
 import { eq } from "drizzle-orm";
 import UsageDashboard from "./usage-dashboard";
 import styles from "./dashboard.module.css";
@@ -18,7 +18,7 @@ export default async function UserPage({ params, searchParams }: {
   // A trusted session allows self-access without making the profile public.
   // All other visitors still pass the membership gate before analytics load.
   const viewer = await currentUser();
-  const profile = await userProfile(getDb(), decodeURIComponent(handle), {
+  const profile = await userDashboard(getDb(), decodeURIComponent(handle), {
     window, dailyAnalytics: true, ...(viewer ? { viewerId: viewer.id } : {}),
   });
   if (!profile) notFound();

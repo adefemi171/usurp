@@ -8,6 +8,8 @@
 
 import { getDb, longestReigns } from "@usurp/db";
 import { currentUser } from "../../../lib/session";
+import Link from "next/link";
+import NavigationPending from "../../navigation-pending";
 
 /**
  * Required, unlike the other pages.
@@ -46,9 +48,9 @@ export default async function LongestReignPage() {
             still leaves a record.
           </p>
         </div>
-        <a className="tab" href="/">
-          ← Board
-        </a>
+        <Link className="tab" href="/">
+          ← Board<NavigationPending />
+        </Link>
       </header>
       <div className="reign-intro">
         <span aria-hidden="true">♛</span>
@@ -96,23 +98,23 @@ export default async function LongestReignPage() {
                   <td className="rank">{i + 1}</td>
                   <td className="who">
                     {r.holder.handle ? (
-                      <a
+                      <Link
                         className="who-link"
                         href={`/u/${encodeURIComponent(r.holder.handle)}`}
                       >
                         {r.holder.handle}
-                      </a>
+                      </Link>
                     ) : (
                       <span className="anon">{r.holder.pseudonym}</span>
                     )}
                   </td>
                   <td className="sub">
-                    <a
+                    <Link
                       className="who-link"
                       href={`/a/${r.arena.slug}?metric=rating`}
                     >
                       {r.arena.name}
-                    </a>
+                    </Link>
                   </td>
                   <td className="num">
                     {span(r.days)}

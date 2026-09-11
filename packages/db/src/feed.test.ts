@@ -208,6 +208,20 @@ describe.skipIf(!hasDb)("feed (database)", () => {
   });
 
   describe("longestReigns", () => {
+    it("keeps visibility scoped per arena when memberships are fetched in one batch", async () => {
+      const { arena: first, a, b } = await withUsurping();
+      const second = await newArena([a.id, b.id]);
+      const season = await ensureCurrentSeason(db, second.id, NOW);
+      await setDay(a.id, NOW, 2000);
+      await recomputeStandings(db, second.id, season, NOW);
+      await setVisibility(db, a.id, first.id, "hidden");
+      const records = await longestReigns(db, { now: NOW, viewerId: a.id });
+      expect(records.filter(r => r.arena.slug === first.slug).map(r => r.holder.handle))
+        .not.toContain(a.handle);
+      expect(records.filter(r => r.arena.slug === second.slug).map(r => r.holder.handle))
+        .toContain(a.handle);
+    });
+
     it("ranks by duration and marks the open reign", async () => {
       const { arena, a, b } = await withUsurping();
       const records = await longestReigns(db, {

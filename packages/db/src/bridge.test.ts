@@ -5,7 +5,7 @@ import { mergeBridgeSeries, saveOwnedBridge, selectedBridgeSnapshots } from "./b
 import { getDb, closeDb } from "./client.js";
 import { devices, users, usageBridgeSnapshots, usageEvents } from "./schema.js";
 import { ingest } from "./ingest.js";
-import { userProfile, type UsageSeriesPoint } from "./profile.js";
+import { userDashboard, userProfile, type UsageSeriesPoint } from "./profile.js";
 import { joinGlobalArena } from "./seed.js";
 
 const now = new Date("2026-09-09T12:00:00Z");
@@ -114,6 +114,9 @@ describe.skipIf(!process.env.DATABASE_URL)("bridge persistence", () => {
       expect(p?.analyticsSeries[0]?.costMicros).toBe(50);
       expect(p?.deviceCount).toBe(1);
       expect(p?.usageSeries).toHaveLength(0);
+      const dashboard = await userDashboard(db, user!.handle, { window: "day", now });
+      const { byModel, byDay, byAgent, byModelAgent, ...expectedDashboard } = p!;
+      expect(dashboard).toEqual(expectedDashboard);
       const invalid = payload(3, 500); invalid.bridge!.rows[0]!.costMicros++;
       expect((await ingest(db, invalid, { now })).failure).toBe("bad_signature");
       await db.update(devices).set({ revokedAt: now }).where(eq(devices.id, id));

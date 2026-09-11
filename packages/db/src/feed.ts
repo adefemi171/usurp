@@ -14,7 +14,7 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { arenaMembers, arenas, events, reigns, users } from "./schema.js";
 import { pseudonymFor } from "./board.js";
@@ -142,19 +142,22 @@ export async function arenaFeed(
     .limit(1);
   if (!arena) return undefined;
 
-  const members = await arenaVisibility(db, arena.id);
-
   const conditions = [eq(events.arenaId, arena.id)];
   if (options.before) conditions.push(lt(events.createdAt, options.before));
 
   // Over-fetch, because entries naming a hidden member are dropped after the
   // query and would otherwise short the page.
-  const rows = await db
+  const rowsQuery = db
     .select()
     .from(events)
     .where(and(...conditions))
     .orderBy(desc(events.createdAt))
     .limit(limit * 3);
+
+  const [members, rows] = await Promise.all([
+    arenaVisibility(db, arena.id),
+    rowsQuery,
+  ]);
 
   const entries: FeedEntry[] = [];
 
@@ -277,9 +280,10 @@ export async function longestReigns(
     Map<string, { handle: string; visibility: string; status: string }>
   >();
 
-  for (const arenaId of arenaIds) {
+  if (arenaIds.length > 0) {
     const memberRows = await db
       .select({
+        arenaId: arenaMembers.arenaId,
         userId: arenaMembers.userId,
         handle: users.handle,
         visibility: arenaMembers.visibility,
@@ -287,8 +291,11 @@ export async function longestReigns(
       })
       .from(arenaMembers)
       .innerJoin(users, eq(users.id, arenaMembers.userId))
-      .where(eq(arenaMembers.arenaId, arenaId));
-    members.set(arenaId, new Map(memberRows.map((m) => [m.userId, m])));
+      .where(inArray(arenaMembers.arenaId, arenaIds));
+    for (const row of memberRows) {
+      if (!members.has(row.arenaId)) members.set(row.arenaId, new Map());
+      members.get(row.arenaId)!.set(row.userId, row);
+    }
   }
 
   const out: ReignRecord[] = [];

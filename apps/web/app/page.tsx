@@ -8,6 +8,8 @@ import { currentUser } from "../lib/session";
 import { baseUrl } from "../lib/env";
 import ShareMenu from "./share-menu";
 import LiveRefresh from "./live-refresh";
+import Link from "next/link";
+import NavigationPending from "./navigation-pending";
 
 export default async function Page({
   searchParams,
@@ -37,7 +39,7 @@ export default async function Page({
             on your terms.
           </p>
           <div className="hero-actions">
-            <a
+            <Link
               className="button"
               href={
                 user
@@ -46,8 +48,8 @@ export default async function Page({
               }
             >
               {user ? "Explore my usage" : "Get started"}{" "}
-              <span aria-hidden="true">↗</span>
-            </a>
+              <span aria-hidden="true">↗</span><NavigationPending />
+            </Link>
             <a className="button secondary" href="#arena">
               Explore the arena <span aria-hidden="true">↓</span>
             </a>

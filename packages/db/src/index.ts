@@ -76,6 +76,8 @@ export {
 export {
   derivedSignals,
   userProfile,
+  userDashboard,
+  type DashboardProfile,
   type AgentBreakdown,
   type DayBreakdown,
   type ModelBreakdown,

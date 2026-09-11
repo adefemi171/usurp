@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Db } from "./client.js";
-import { userProfile } from "./profile.js";
+import { userDashboard, userProfile } from "./profile.js";
 
 /** Controllable lazy reads: no wall-clock performance thresholds or real pool. */
 function controlledDb() {
@@ -47,48 +47,53 @@ describe("profile read scheduling", () => {
     const result = userProfile(db, user.handle, { window: "all", dailyAnalytics: true });
     await vi.waitFor(() => expect(started).toEqual([0]));
     expect(reads).toHaveLength(1);
-    reads[0]!.resolve([user]);
-    await vi.waitFor(() => expect(started).toEqual([0, 1]));
-    expect(reads).toHaveLength(2);
-    reads[1]!.resolve([arena]);
+    reads[0]!.resolve([{ user, visibleArenas: [arena] }]);
     // None of the summaries has resolved yet: all seven must already be running.
-    await vi.waitFor(() => expect(started).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]));
-    for (const read of reads.slice(2)) read.resolve([]);
+    await vi.waitFor(() => expect(started).toEqual([0, 1, 2, 3, 4, 5, 6, 7]));
+    for (const read of reads.slice(1)) read.resolve([]);
     expect(await result).toMatchObject({ handle: user.handle, totals: { calls: 0 } });
   });
 
   it("never starts usage or bridge reads when the visibility gate denies access", async () => {
     const { db, reads } = controlledDb();
     const result = userProfile(db, user.handle, { dailyAnalytics: true, viewerId: "stranger" });
-    reads[0]!.resolve([user]);
-    await vi.waitFor(() => expect(reads).toHaveLength(2));
-    reads[1]!.resolve([]);
+    reads[0]!.resolve([{ user, visibleArenas: [] }]);
     expect(await result).toBeUndefined();
-    expect(reads).toHaveLength(2);
+    expect(reads).toHaveLength(1);
   });
 
   it("allows a private owner but skips bridge reads unless daily analytics is requested", async () => {
     const { db, reads, started } = controlledDb();
     const result = userProfile(db, user.handle, { viewerId: user.id });
-    reads[0]!.resolve([user]);
-    await vi.waitFor(() => expect(reads).toHaveLength(2));
-    reads[1]!.resolve([]);
-    await vi.waitFor(() => expect(started).toHaveLength(8));
-    for (const read of reads.slice(2)) read.resolve([]);
+    reads[0]!.resolve([{ user, visibleArenas: [] }]);
+    await vi.waitFor(() => expect(started).toHaveLength(7));
+    for (const read of reads.slice(1)) read.resolve([]);
     expect(await result).toMatchObject({ arenas: [], bridgeImports: [] });
-    expect(reads).toHaveLength(8);
+    expect(reads).toHaveLength(7);
   });
 
   it("fails the request if a parallel read fails instead of showing partial or zero usage", async () => {
     const { db, reads, started } = controlledDb();
     const result = userProfile(db, user.handle, { dailyAnalytics: true });
     const rejected = expect(result).rejects.toThrow("database unavailable");
-    reads[0]!.resolve([user]);
-    await vi.waitFor(() => expect(reads).toHaveLength(2));
-    reads[1]!.resolve([arena]);
-    await vi.waitFor(() => expect(started).toHaveLength(9));
-    reads[2]!.reject(new Error("database unavailable"));
-    for (const read of reads.slice(3)) read.resolve([]);
+    reads[0]!.resolve([{ user, visibleArenas: [arena] }]);
+    await vi.waitFor(() => expect(started).toHaveLength(8));
+    reads[1]!.reject(new Error("database unavailable"));
+    for (const read of reads.slice(2)) read.resolve([]);
     await rejected;
+  });
+
+  it("executes only identity, totals, daily series and bridge for the dashboard", async () => {
+    const { db, reads, started } = controlledDb();
+    const result = userDashboard(db, user.handle);
+    await vi.waitFor(() => expect(started).toEqual([0]));
+    expect(reads).toHaveLength(1);
+    reads[0]!.resolve([{ user, visibleArenas: [arena] }]);
+    await vi.waitFor(() => expect(started).toEqual([0, 1, 6, 7]));
+    for (const index of started.slice(1)) reads[index]!.resolve([]);
+    const dashboard = await result;
+    expect(dashboard).toMatchObject({ handle: user.handle });
+    for (const field of ["byModel", "byDay", "byAgent", "byModelAgent"])
+      expect(dashboard).not.toHaveProperty(field);
   });
 });

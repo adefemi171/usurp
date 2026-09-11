@@ -24,8 +24,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import {
-  arenaMembers,
-  arenas,
   usageEvents,
   users,
   devices,
@@ -162,6 +160,29 @@ export async function userProfile(
   handle: string,
   options: ProfileOptions = {},
 ): Promise<Profile | undefined> {
+  return readProfile(db, handle, options, true);
+}
+
+/** The dashboard does not consume the API's four standalone breakdowns. */
+export type DashboardProfile = Omit<Profile, "byModel" | "byDay" | "byAgent" | "byModelAgent">;
+
+export async function userDashboard(
+  db: Db,
+  handle: string,
+  options: ProfileOptions = {},
+): Promise<DashboardProfile | undefined> {
+  const profile = await readProfile(db, handle, { ...options, dailyAnalytics: true }, false);
+  if (!profile) return undefined;
+  const { byModel, byDay, byAgent, byModelAgent, ...dashboard } = profile;
+  return dashboard;
+}
+
+async function readProfile(
+  db: Db,
+  handle: string,
+  options: ProfileOptions,
+  breakdowns: boolean,
+): Promise<Profile | undefined> {
   const window = options.window ?? "week";
   let since = windowStart(window, options.now);
   if (options.dailyAnalytics && since) {
@@ -174,30 +195,29 @@ export async function userProfile(
 
   // Case-insensitive, matching the `lower(handle)` unique index — otherwise
   // `/u/Kenn` and `/u/kenn` disagree about who exists.
-  const [user] = await db
-    .select()
+  // Lookup and arena visibility share one round trip. The correlated subquery
+  // returns only arena names this viewer may see; no usage is read until the
+  // owner/public-membership gate below has passed.
+  const [identity] = await db
+    .select({
+      user: users,
+      visibleArenas: sql<Profile["arenas"]>`coalesce((
+        select jsonb_agg(jsonb_build_object('slug', a.slug, 'name', a.name, 'type', a.type))
+        from arena_members m inner join arenas a on a.id = m.arena_id
+        where m.user_id = "users"."id"
+          and m.visibility = 'public' and m.status <> 'left'
+          and (a.type = 'global' or "users"."id"::text = ${options.viewerId ?? ""}
+            or a.owner_user_id::text = ${options.viewerId ?? ""}
+            or exists(select 1 from arena_members viewer_member where viewer_member.arena_id=a.id
+              and viewer_member.user_id::text=${options.viewerId ?? ""} and viewer_member.status <> 'left'))
+      ), '[]'::jsonb)`,
+    })
     .from(users)
     .where(sql`lower(${users.handle}) = lower(${handle})`)
     .limit(1);
 
-  if (!user) return undefined;
-
-  // The visibility gate. Absent / hidden / anonymous are indistinguishable.
-  const visibleArenas = await db
-    .select({ slug: arenas.slug, name: arenas.name, type: arenas.type })
-    .from(arenaMembers)
-    .innerJoin(arenas, eq(arenas.id, arenaMembers.arenaId))
-    .where(
-      and(
-        eq(arenaMembers.userId, user.id),
-        eq(arenaMembers.visibility, "public"),
-        sql`${arenaMembers.status} <> 'left'`,
-        sql`(${arenas.type} = 'global' or ${user.id}::text = ${options.viewerId ?? ""}
-          or ${arenas.ownerUserId}::text = ${options.viewerId ?? ""}
-          or exists(select 1 from arena_members viewer_member where viewer_member.arena_id=${arenas.id}
-            and viewer_member.user_id::text=${options.viewerId ?? ""} and viewer_member.status <> 'left'))`,
-      ),
-    );
+  if (!identity) return undefined;
+  const { user, visibleArenas } = identity;
 
   if (visibleArenas.length === 0 && options.viewerId !== user.id)
     return undefined;
@@ -352,10 +372,10 @@ export async function userProfile(
   const [[t], byModel, byDay, byAgent, byModelAgent, series, snapshots] =
     await Promise.all([
       totalsQuery,
-      byModelQuery,
-      byDayQuery,
-      byAgentQuery,
-      byModelAgentQuery,
+      breakdowns ? byModelQuery : [],
+      breakdowns ? byDayQuery : [],
+      breakdowns ? byAgentQuery : [],
+      breakdowns ? byModelAgentQuery : [],
       seriesQuery,
       snapshotsQuery,
     ]);

@@ -13,7 +13,7 @@
  * get a materialized view, not a hand-rolled cache.
  */
 
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { arenaMembers, arenas, usageEvents, users } from "./schema.js";
 
@@ -156,12 +156,17 @@ export async function burnBoard(
   const offset = Math.max(options.offset ?? 0, 0);
   const since = windowStart(window, options.now);
 
-  const [arena] = await db
-    .select()
+  const [context] = await db
+    .select({
+      arena: arenas,
+      memberCount: sql<number>`(select count(*)::int from arena_members m
+        where m.arena_id = "arenas"."id" and m.status <> 'left')`,
+    })
     .from(arenas)
     .where(eq(arenas.slug, slug))
     .limit(1);
-  if (!arena) return undefined;
+  if (!context) return undefined;
+  const { arena, memberCount } = context;
 
   /**
    * `#2` — hidden members are excluded from the board entirely, not merely
@@ -175,28 +180,36 @@ export async function burnBoard(
       handle: users.handle,
       avatarUrl: users.avatarUrl,
       reviewState: users.reviewState,
+      effective: effectiveTokens,
+      input: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)`,
+      output: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)`,
+      cacheWrite: sql<number>`coalesce(sum(${usageEvents.cacheWriteTokens}), 0)`,
+      cacheRead: sql<number>`coalesce(sum(${usageEvents.cacheReadTokens}), 0)`,
+      calls: sql<number>`coalesce(sum(${usageEvents.calls}), 0)`,
+      cost: sql<number>`coalesce(sum(${usageEvents.costMicros}), 0)`,
+      flagged: sql<boolean>`bool_or(jsonb_array_length(${usageEvents.flags}) > 0)`,
+      pricingWarnings: sql<boolean>`bool_or(${usageEvents.flags} ?| array['unknown_model', 'cost_mismatch'])`,
+      // An enrolled member with no events remains CLI signed, as before.
+      signed: sql<boolean>`coalesce(bool_or(${usageEvents.sigOk}), true)`,
     })
     .from(arenaMembers)
     .innerJoin(users, eq(users.id, arenaMembers.userId))
+    // Filter the joined events by time, not the WHERE clause: zero-usage
+    // members must remain visible. Hidden/left members are still excluded.
+    .leftJoin(usageEvents, and(
+      eq(usageEvents.userId, arenaMembers.userId),
+      since ? gte(usageEvents.hour, since) : undefined,
+    ))
     .where(
       and(
         eq(arenaMembers.arenaId, arena.id),
         sql`${arenaMembers.visibility} <> 'hidden'`,
         sql`${arenaMembers.status} <> 'left'`,
       ),
-    );
+    )
+    .groupBy(arenaMembers.userId, arenaMembers.visibility, users.handle,
+      users.avatarUrl, users.reviewState);
 
-  const [memberTally] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(arenaMembers)
-    .where(
-      and(
-        eq(arenaMembers.arenaId, arena.id),
-        sql`${arenaMembers.status} <> 'left'`,
-      ),
-    );
-
-  const memberCount = Number(memberTally?.n ?? 0);
   const inviteCode =
     options.viewerId && arena.ownerUserId === options.viewerId
       ? arena.inviteCode
@@ -213,36 +226,9 @@ export async function burnBoard(
     };
   }
 
-  const memberIds = visible.map((m) => m.userId);
-  const conditions = [inArray(usageEvents.userId, memberIds)];
-  if (since) conditions.push(gte(usageEvents.hour, since));
-
-  const totals = await db
-    .select({
-      userId: usageEvents.userId,
-      effective: effectiveTokens,
-      input: sql<number>`coalesce(sum(${usageEvents.inputTokens}), 0)`,
-      output: sql<number>`coalesce(sum(${usageEvents.outputTokens}), 0)`,
-      cacheWrite: sql<number>`coalesce(sum(${usageEvents.cacheWriteTokens}), 0)`,
-      cacheRead: sql<number>`coalesce(sum(${usageEvents.cacheReadTokens}), 0)`,
-      calls: sql<number>`coalesce(sum(${usageEvents.calls}), 0)`,
-      cost: sql<number>`coalesce(sum(${usageEvents.costMicros}), 0)`,
-      // A user is flagged if any of their rows in the window carries a gate
-      // flag. `#3.4` shows them, flagged, rather than hiding the evidence.
-      flagged: sql<boolean>`bool_or(jsonb_array_length(${usageEvents.flags}) > 0)`,
-      pricingWarnings: sql<boolean>`bool_or(${usageEvents.flags} ?| array['unknown_model', 'cost_mismatch'])`,
-      signed: sql<boolean>`bool_or(${usageEvents.sigOk})`,
-    })
-    .from(usageEvents)
-    .where(and(...conditions))
-    .groupBy(usageEvents.userId)
-    .orderBy(desc(effectiveTokens));
-
-  const byUser = new Map(totals.map((t) => [t.userId, t]));
-
   const ranked = visible
     .map((member) => {
-      const t = byUser.get(member.userId);
+      const t = member;
       const anonymous = member.visibility === "anonymous";
       return {
         userId: member.userId,
