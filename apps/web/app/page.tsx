@@ -116,7 +116,6 @@ export default async function Page({
           metric={metric}
           window={window}
           trust={trust}
-          anchor="#arena"
         />
         <LiveRefresh />
         {metric === "rating" ? (

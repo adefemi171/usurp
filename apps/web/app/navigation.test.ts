@@ -33,6 +33,12 @@ describe("application navigation", () => {
     expect(html).not.toContain('aria-label="Window"');
     expect(html).toMatch(/<a[^>]*aria-current="true"[^>]*>Rating<\/a>/);
   });
+  it("switches metrics with query-only URLs and preserves trust and Burn period", () => {
+    const html = renderToStaticMarkup(createElement(BoardNav, { metric: "burn", window: "month", trust: "cli_signed" }));
+    expect(html).toContain('href="?metric=rating&amp;trust=cli_signed"');
+    expect(html).toContain('href="?metric=burn&amp;window=month&amp;trust=cli_signed"');
+    expect(html).not.toContain("#arena");
+  });
   it("provides recovery links without revealing whether a private profile exists", () => {
     const html = renderToStaticMarkup(createElement(NotFound));
     expect(html).toContain("may be private");
