@@ -35,7 +35,7 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import {
   DEFAULT_WEIGHTS,
   dailyScore,
@@ -53,6 +53,7 @@ import {
   dailyScores,
   events,
   reigns,
+  seasons,
   standings,
   usageEvents,
   users,
@@ -66,7 +67,6 @@ import {
 } from "./seasons.js";
 import { EVENT_CROWNED, EVENT_USURPED, titleForRank } from "./titles.js";
 import { pseudonymFor } from "./board.js";
-import { currentSovereign } from "./feed.js";
 
 /**
  * How far back to read activity when computing a streak.
@@ -662,27 +662,25 @@ export async function ratingBoard(
   const offset = Math.max(options.offset ?? 0, 0);
   const now = options.now ?? new Date();
 
-  const [arena] = await db
-    .select()
+  // One snapshot/round trip for the context instead of four separate reads.
+  // Names and activity are still resolved through membership visibility below.
+  const [context] = await db
+    .select({
+      arena: arenas,
+      season: seasons,
+      sovereign: { userId: reigns.userId, startedAt: reigns.startedAt },
+      memberCount: sql<number>`(select count(*)::int from arena_members m
+        where m.arena_id = "arenas"."id" and m.status <> 'left')`,
+    })
     .from(arenas)
+    .leftJoin(seasons, and(eq(seasons.arenaId, arenas.id), lte(seasons.startsAt, now), gte(seasons.endsAt, now)))
+    .leftJoin(reigns, and(eq(reigns.arenaId, arenas.id), isNull(reigns.endedAt)))
     .where(eq(arenas.slug, slug))
     .limit(1);
-  if (!arena) return undefined;
-
-  // Independent reads must not incur consecutive remote database round trips.
-  const [season, sovereign, [memberTally]] = await Promise.all([
-    ensureCurrentSeason(db, arena.id, now),
-    currentSovereign(db, arena.id),
-    db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(arenaMembers)
-      .where(
-        and(
-          eq(arenaMembers.arenaId, arena.id),
-          sql`${arenaMembers.status} <> 'left'`,
-        ),
-      ),
-  ]);
+  if (!context) return undefined;
+  const { arena, sovereign } = context;
+  // Preserve creation/schedule handling for a new arena or season rollover.
+  const season = context.season ?? await ensureCurrentSeason(db, arena.id, now);
 
   const rows = await db
     .select({
@@ -779,7 +777,7 @@ export async function ratingBoard(
     rows: pageRows,
     total: mapped.filter((r) => !options.trust || r.trustTier === options.trust)
       .length,
-    memberCount: Math.max(Number(memberTally?.n ?? 0), active.length),
+    memberCount: Math.max(Number(context.memberCount ?? 0), active.length),
     throne: sovereign
       ? {
           userId: sovereign.userId,

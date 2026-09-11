@@ -10,6 +10,7 @@ import ShareMenu from "./share-menu";
 import LiveRefresh from "./live-refresh";
 import Link from "next/link";
 import NavigationPending from "./navigation-pending";
+import { Suspense } from "react";
 
 export default async function Page({
   searchParams,
@@ -97,7 +98,9 @@ export default async function Page({
         <p className="eyebrow">Across the league</p>
         <span className="sub">Public competition · native activity</span>
       </div>
-      <HeroStats />
+      <Suspense fallback={<p className="sub" role="status">Loading league totals…</p>}>
+        <HeroStats />
+      </Suspense>
 
       <section id="arena" className="arena-panel" aria-label="Global arena">
         <div className="section-heading">
@@ -135,14 +138,16 @@ export default async function Page({
           </div>
         )}
 
-        {metric === "rating" ? (
-          <>
-            <RatingView slug={GLOBAL_ARENA_SLUG} trust={trust} />
-            <FeedView slug={GLOBAL_ARENA_SLUG} />
-          </>
-        ) : (
-          <BoardView slug={GLOBAL_ARENA_SLUG} window={window} trust={trust} />
-        )}
+        {/* Global is public. Keep these boundaries local: private arena/profile
+            routes must finish authorization before sending a response. */}
+        <Suspense key={`${metric}:${window}:${trust ?? "all"}`}
+          fallback={<div className="empty" role="status" aria-live="polite">Loading {metric === "rating" ? "Rating" : "Burn"} standings…</div>}>
+          {metric === "rating" ? <RatingView slug={GLOBAL_ARENA_SLUG} trust={trust} />
+            : <BoardView slug={GLOBAL_ARENA_SLUG} window={window} trust={trust} />}
+        </Suspense>
+        {metric === "rating" && <Suspense fallback={null}>
+          <FeedView slug={GLOBAL_ARENA_SLUG} />
+        </Suspense>}
       </section>
       <section
         className="home-features"

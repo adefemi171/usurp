@@ -6,7 +6,7 @@
  * history, and the day-ordered decay replay.
  */
 
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { and, desc, eq } from "drizzle-orm";
 import { closeDb, getDb } from "./client.js";
 import {
@@ -380,6 +380,41 @@ describe.skipIf(!hasDb)("rating (database)", () => {
   });
 
   describe("ratingBoard", () => {
+    it("reads existing season context and empty standings in only two selects", async () => {
+      const a = await newUser();
+      const arena = await newArena([a.id]);
+      const season = await ensureCurrentSeason(db, arena.id, NOW);
+      const select = vi.spyOn(db, "select");
+      try {
+        const board = await ratingBoard(db, arena.slug, { now: NOW });
+        expect(select).toHaveBeenCalledTimes(2);
+        expect(board).toMatchObject({ memberCount: 1, throne: null, rows: [],
+          season: { idx: season.idx, startsAt: season.startsAt, endsAt: season.endsAt } });
+      } finally { select.mockRestore(); }
+    });
+
+    it("keeps the throne private when its holder becomes hidden", async () => {
+      const a = await newUser();
+      const b = await newUser();
+      const arena = await newArena([a.id, b.id]);
+      const season = await ensureCurrentSeason(db, arena.id, NOW);
+      await setDay(a.id, NOW, 100);
+      await recomputeStandings(db, arena.id, season, NOW);
+      await setVisibility(db, a.id, arena.id, "hidden");
+      const board = await ratingBoard(db, arena.slug, { now: addDays(NOW, 1) });
+      expect(board?.throne).toMatchObject({ display: null, heldSeconds: 86400 });
+      expect(JSON.stringify(board)).not.toContain(a.handle);
+    });
+
+    it("retains season creation on rollover after the joined lookup misses", async () => {
+      const a = await newUser();
+      const arena = await newArena([a.id]);
+      const first = await ensureCurrentSeason(db, arena.id, NOW);
+      const board = await ratingBoard(db, arena.slug, { now: addDays(first.endsAt, 1) });
+      expect(board?.season).toMatchObject({ idx: 2, startsAt: first.endsAt });
+      expect(board?.memberCount).toBe(1);
+    });
+
     it("never serializes provider real names", async () => {
       const a = await newUser();
       const b = await newUser();
