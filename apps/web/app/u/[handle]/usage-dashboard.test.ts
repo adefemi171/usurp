@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { UsageSeriesPoint } from "@usurp/db";
 vi.mock("next/navigation", () => ({ usePathname: () => "/u/test", useRouter: () => ({ refresh() {}, push() {} }) }));
-import UsageDashboard from "./usage-dashboard";
+import UsageDashboard, { ExactDailyData } from "./usage-dashboard";
 const row: UsageSeriesPoint = {
   day: "2026-09-09", agent: "codex", model: "test-model", inputTokens: 100, outputTokens: 20, cacheWriteTokens: 0, cacheReadTokens: 500,
   effectiveTokens: 120, costMicros: 1234567, calls: 0, sessionsStarted: 0, sessionsCompleted: 0, sessionsAbandoned: 0, editsApplied: 0, editsReverted: 0, commits: 0,
@@ -39,7 +39,25 @@ describe("usage dashboard source clarity", () => {
   });
   it("does not pretend cloud refresh collects local data", () => { expect(render([row], false)).toContain("Refresh view"); });
   it("labels absent snapshot counters unavailable", () => {
-    const html = render(); expect(html).toContain("<td>Unavailable</td>"); expect(html).not.toContain("0 conversations");
+    const html = renderToStaticMarkup(createElement(ExactDailyData, { rows: [row] }));
+    expect(html).toContain("<td>Unavailable</td>"); expect(html).toContain("1.234567");
+    expect(html).not.toContain("0 conversations");
+  });
+  it("does not render the collapsed detail table during initial page load", () => {
+    const html = render();
+    expect(html).toContain("View exact daily data");
+    expect(html).toContain("1 daily model / agent records");
+    expect(html).not.toContain("<table");
+    expect(html).toContain("$1.23");
+  });
+  it("keeps exact table filtering and newest-first ordering without changing input", () => {
+    const rows = [row, { ...row, day: "2026-09-10", agent: "cursor", model: "filtered-model", costMicros: 9876543 }];
+    const html = renderToStaticMarkup(createElement(ExactDailyData, { rows }));
+    expect(html.indexOf("2026-09-10")).toBeLessThan(html.indexOf("2026-09-09"));
+    expect(rows[0]).toBe(row);
+    const filtered = renderToStaticMarkup(createElement(ExactDailyData, { rows: rows.filter(r => r.agent === "cursor") }));
+    expect(filtered).toContain("9.876543");
+    expect(filtered).not.toContain("test-model");
   });
   it("keeps metadata-only models out of measured rankings and avoids fake zero usage", () => {
     const html = render([{ ...row, source: "native", model: "metadata-only", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costMicros: 0, effectiveTokens: 0, sessionsStarted: 1 }]);

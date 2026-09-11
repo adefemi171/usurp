@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageSeriesPoint } from "@usurp/db";
-import { chartDays, colorFor, filterSeries, percentage, sharesFor, summarizeSeries, treemap } from "./dashboard-data";
+import { chartDays, colorFor, compact, filterSeries, money, number, percentage, sharesFor, summarizeSeries, treemap } from "./dashboard-data";
 
 const point = (overrides: Partial<UsageSeriesPoint> = {}): UsageSeriesPoint => ({
   day: "2026-05-05", agent: "vscode-copilot", model: "claude-sonnet-4-6",
@@ -11,6 +11,13 @@ const point = (overrides: Partial<UsageSeriesPoint> = {}): UsageSeriesPoint => (
 });
 
 describe("dashboard aggregation", () => {
+  it("preserves formatting precision at currency and compact-number boundaries", () => {
+    for (const value of [0, 1, 12345, 999999, 1000000, 1234567890]) {
+      expect(number(value)).toBe(value.toLocaleString("en-US"));
+      expect(compact(value)).toBe(new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: value >= 1_000_000_000 ? 2 : 1 }).format(value));
+      expect(money(value)).toBe(new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value > 0 && value < 1_000_000 ? 4 : 2 }).format(value / 1_000_000));
+    }
+  });
   it("does not label small nonzero shares as zero", () => {
     expect(percentage(1, 10000)).toBe("<0.1%");
     expect(percentage(0, 0)).toBe("0.0%");

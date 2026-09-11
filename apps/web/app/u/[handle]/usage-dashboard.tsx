@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { BoardWindow, UsageSeriesPoint } from "@usurp/db";
 import { agentName, chartDays, colorFor, compact, filterSeries, formatValue, money, number, percentage, sharesFor, summarizeSeries, treemap, sessionOnly, type Grouping, type Metric } from "./dashboard-data";
 import { efficiencyAdvice } from "./efficiency-advice";
 import styles from "./dashboard.module.css";
 
-const dateLabel = (day: string) => new Date(day).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const dateFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const dateLabel = (day: string) => dateFormat.format(new Date(day));
 function Segments<T extends string>({ label, options, value, onChange }: {
   label: string; options: Array<{ value: T; label: string }>; value: T; onChange: (value: T) => void;
 }) {
@@ -46,19 +47,20 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
   const [model, setModel] = useState("");
   const [hoverDay, setHoverDay] = useState<number | null>(null);
   const [view, setView] = useState<"treemap" | "list">("treemap");
+  const [exactOpen, setExactOpen] = useState(false);
   const [feedbackByAdvice, setFeedbackByAdvice] = useState(() => new Map(feedback.map(item => [item.recommendation, item.response])));
-  const filtered = filterSeries(rows, agent, model);
-  const totals = summarizeSeries(filtered);
+  const filtered = useMemo(() => filterSeries(rows, agent, model), [rows, agent, model]);
+  const totals = useMemo(() => summarizeSeries(filtered), [filtered]);
   const missingUsage = filtered.some(sessionOnly);
   const onlyMetadata = filtered.length > 0 && filtered.every(sessionOnly);
-  const shares = sharesFor(filtered, grouping, metric);
-  const days = chartDays(filtered.filter(r => metric === "cost" ? r.costMicros > 0 : !sessionOnly(r)), grouping, metric);
+  const shares = useMemo(() => sharesFor(filtered, grouping, metric), [filtered, grouping, metric]);
+  const days = useMemo(() => chartDays(filtered.filter(r => metric === "cost" ? r.costMicros > 0 : !sessionOnly(r)), grouping, metric), [filtered, grouping, metric]);
   const hasBridge = filtered.some(r => r.source === "agentsview" || r.source === "mixed");
   const hasNativeCost = filtered.some(r => r.source !== "agentsview" && r.costMicros > 0);
   const missingCalls = filtered.some(r => r.callsAvailable === false);
   const unpricedModels = [...new Set(filtered.filter(r => r.unpricedBuckets > 0).map(r => r.model))];
   const metadataModels = [...new Set(filtered.filter(sessionOnly).map(r => r.model))];
-  const tiles = treemap(shares);
+  const tiles = useMemo(() => treemap(shares), [shares]);
   const totalValue = metric === "cost" ? totals.cost : totals.tokens;
   const costUnavailable = onlyMetadata || (totals.unpriced > 0 && !totals.cost);
   const metricUnavailable = metric === "cost" ? costUnavailable : onlyMetadata;
@@ -77,17 +79,20 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
   };
   const reset = () => { setAgent(""); setModel(""); setHoverDay(null); };
   const x = (i: number) => days.length > 1 ? i / (days.length - 1) * 1000 : 500;
-  const y = (value: number) => 220 - value / max * 220;
-  const stacked = Array.from({ length: days.length }, () => 0);
-  const areas = shares.map(share => {
-    const bottom = [...stacked];
-    days.forEach((d, i) => { stacked[i] = (stacked[i] ?? 0) + (d.values[share.name] ?? 0); });
-    const top = [...stacked];
-    const points = days.length === 1
-      ? `0,${y(top[0]!)} 1000,${y(top[0]!)} 1000,${y(bottom[0]!)} 0,${y(bottom[0]!)}`
-      : [...top.map((v, i) => `${x(i)},${y(v)}`), ...bottom.map((v, i) => `${x(i)},${y(v)}`).reverse()].join(" ");
-    return { name: share.name, points };
-  });
+  const areas = useMemo(() => {
+    const x = (i: number) => days.length > 1 ? i / (days.length - 1) * 1000 : 500;
+    const y = (value: number) => 220 - value / max * 220;
+    const stacked = Array.from({ length: days.length }, () => 0);
+    return shares.map(share => {
+      const bottom = [...stacked];
+      days.forEach((d, i) => { stacked[i] = (stacked[i] ?? 0) + (d.values[share.name] ?? 0); });
+      const top = [...stacked];
+      const points = days.length === 1
+        ? `0,${y(top[0]!)} 1000,${y(top[0]!)} 1000,${y(bottom[0]!)} 0,${y(bottom[0]!)}`
+        : [...top.map((v, i) => `${x(i)},${y(v)}`), ...bottom.map((v, i) => `${x(i)},${y(v)}`).reverse()].join(" ");
+      return { name: share.name, points };
+    });
+  }, [days, shares, max]);
   const topPairs = new Map<string, { agent: string; model: string; value: number; calls: number; unpriced: number; sessions: number }>();
   for (const row of filtered) {
     if (sessionOnly(row)) continue;
@@ -222,17 +227,24 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
           <div className={styles.cacheFooter}><span>AVERAGE / ACTIVE DAY</span><strong>{metricUnavailable ? "Unavailable" : totals.activeDays ? formatValue(totalValue / totals.activeDays, metric) : "—"}</strong></div>
         </section>
       </div>
-      <details className={`${styles.panel} ${styles.exact}`}><summary>View exact daily data <span>{filtered.length} daily model / agent records</span></summary><div className={styles.tableScroll}>
+      <details className={`${styles.panel} ${styles.exact}`} onToggle={event => setExactOpen(event.currentTarget.open)}><summary>View exact daily data <span>{filtered.length} daily model / agent records</span></summary>
+        {exactOpen && <ExactDailyData rows={filtered} />}
+      </details>
+    </>}
+    <p className={styles.lastSeen}>{lastSeen ? `Latest native activity: ${lastSeen.slice(0, 16).replace("T", " ")} UTC` : "No native activity yet"} · {onlyMetadata ? "Call counts unavailable." : missingCalls ? "Call counts are incomplete in this view." : `${number(totals.calls)} native calls.`} Refresh never reads files from your computer.</p>
+  </>;
+}
+
+/** Materialize the full detail table only when requested, using the same rows. */
+export function ExactDailyData({ rows }: { rows: UsageSeriesPoint[] }) {
+  return <div className={styles.tableScroll}>
         <table><caption>Reported counters for the selected filters. Unavailable means the source did not supply this field.</caption><thead><tr>{["Day (UTC)", "Agent", "Model", "Source", "Calls", "Input", "Output", "Cache write", "Cache read", "Usage cost (USD)", "Sessions started", "Completed", "Abandoned", "Edits applied", "Reverted", "Commits"].map(h => <th key={h} scope="col">{h}</th>)}</tr></thead>
-          <tbody>{[...filtered].reverse().map(r => <tr key={JSON.stringify([r.day, r.agent, r.model])}>
+          <tbody>{[...rows].reverse().map(r => <tr key={JSON.stringify([r.day, r.agent, r.model])}>
             <td>{r.day}{r.historicalBuckets > 0 ? " · historical" : ""}</td><td>{agentName(r.agent)}</td><td>{r.model}</td><td>{r.source ?? "native"}</td>
             <td>{sessionOnly(r) || r.callsAvailable === false ? "Unavailable" : number(r.calls)}</td>
             {[r.inputTokens, r.outputTokens, r.cacheWriteTokens, r.cacheReadTokens].map((n, i) => <td key={i}>{sessionOnly(r) ? "Unavailable" : number(n)}</td>)}
             <td>{sessionOnly(r) ? "Unavailable" : r.unpricedBuckets ? (r.costMicros ? `${(r.costMicros / 1_000_000).toFixed(6)} (partial)` : "Unpriced") : (r.costMicros / 1_000_000).toFixed(6)}</td>
             {[r.sessionsStarted, r.sessionsCompleted, r.sessionsAbandoned, r.editsApplied, r.editsReverted, r.commits].map((n, i) => <td key={i}>{r.callsAvailable === false ? "Unavailable" : number(n)}</td>)}
           </tr>)}</tbody></table>
-      </div></details>
-    </>}
-    <p className={styles.lastSeen}>{lastSeen ? `Latest native activity: ${lastSeen.slice(0, 16).replace("T", " ")} UTC` : "No native activity yet"} · {onlyMetadata ? "Call counts unavailable." : missingCalls ? "Call counts are incomplete in this view." : `${number(totals.calls)} native calls.`} Refresh never reads files from your computer.</p>
-  </>;
+      </div>;
 }

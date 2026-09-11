@@ -6,12 +6,17 @@ export interface Share { name: string; value: number; }
 export interface ChartDay { day: string; values: Record<string, number>; total: number; }
 export interface Tile extends Share { x: number; y: number; width: number; height: number; }
 
-export const number = (n: number) => n.toLocaleString("en-US");
+// Reuse immutable formatters, not user data. Constructing ICU formatters for
+// every chart label/table cell adds unnecessary work on both server and client.
+const integerFormat = new Intl.NumberFormat("en-US");
+const compactFormats = [1, 2].map(maximumFractionDigits => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits }));
+const moneyFormats = [2, 4].map(maximumFractionDigits => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits }));
+export const number = (n: number) => integerFormat.format(n);
 export function compact(n: number): string {
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: n >= 1_000_000_000 ? 2 : 1 }).format(n);
+  return compactFormats[n >= 1_000_000_000 ? 1 : 0]!.format(n);
 }
 export function money(micros: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: micros > 0 && micros < 1_000_000 ? 4 : 2 }).format(micros / 1_000_000);
+  return moneyFormats[micros > 0 && micros < 1_000_000 ? 1 : 0]!.format(micros / 1_000_000);
 }
 export function percentage(value: number, total: number): string {
   const pct = total > 0 ? value / total * 100 : 0;
