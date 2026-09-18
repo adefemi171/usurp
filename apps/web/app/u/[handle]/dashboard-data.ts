@@ -4,6 +4,28 @@ export type Metric = "tokens" | "cost";
 export type Grouping = "model" | "agent";
 export interface Share { name: string; value: number; }
 export interface ChartDay { day: string; values: Record<string, number>; total: number; }
+export type ChartStyle = "lines" | "stacked";
+export function chartGeometry(days: ChartDay[], shares: Share[], style: ChartStyle) {
+  const largest = days.reduce((max, day) => Math.max(max, style === "stacked" ? day.total
+    : shares.reduce((peak, share) => Math.max(peak, day.values[share.name] ?? 0), 0)), 0);
+  const max = Math.max(1, largest) * 1.1;
+  const x = (i: number) => days.length > 1 ? i / (days.length - 1) * 1000 : 500;
+  const y = (value: number) => 220 - value / max * 220;
+  const stacked = days.map(() => 0);
+  const series = shares.map(share => {
+    const bottom = [...stacked];
+    const points = days.map((day, i) => {
+      const value = day.values[share.name] ?? 0;
+      stacked[i] = style === "stacked" ? stacked[i]! + value : value;
+      return { x: x(i), y: y(stacked[i]!), value };
+    });
+    const line = points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+    const base = days.map((_, i) => `L${x(i)},${y(style === "stacked" ? bottom[i]! : 0)}`).reverse().join(" ");
+    // A lone daily sample is a dot, not an invented full-width plateau.
+    return { name: share.name, points, line, area: points.length > 1 ? `${line} ${base} Z` : "" };
+  });
+  return { max, series };
+}
 export interface Tile extends Share { x: number; y: number; width: number; height: number; }
 
 // Reuse immutable formatters, not user data. Constructing ICU formatters for

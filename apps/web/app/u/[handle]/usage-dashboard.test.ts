@@ -13,6 +13,24 @@ function render(rows = [row], canRefreshSource = true) {
   return renderToStaticMarkup(createElement(UsageDashboard, { rows, window: "all", flagged: true, deviceCount: 1, lastSeen: null, bridgeImports: [{ importedAt: "2026-09-09T12:00:00Z", pricingVersion: "v1", agents: ["codex"] }], canRefreshSource, isOwner: true }));
 }
 describe("usage dashboard source clarity", () => {
+  it("defaults to independent lines with an accessible style switch and single-day point", () => {
+    const html = render();
+    expect(html).toContain('aria-label="Chart style"');
+    expect(html).toContain('aria-pressed="true">Lines</button>');
+    expect(html).toContain('aria-label="Usage cost lines by model, 2026-09-09 to 2026-09-09"');
+    expect(html).toContain('<circle cx="500"');
+    expect(html).toContain("Daily snapshots · UTC · Independent series");
+    expect(html).toContain('aria-label="Inspect chart day"');
+    expect(html).toContain('aria-label="Series values for inspected day"');
+    expect(html).not.toMatch(/NaN|Infinity/);
+  });
+  it("uses a shaded line for multi-day data while preserving daily totals", () => {
+    const html = render([row, { ...row, day: "2026-09-10" }]);
+    expect(html).toContain("<linearGradient");
+    expect(html).toContain('fill="url(#');
+    expect(html).toContain("Daily total <strong>$1.23</strong>");
+    expect(html).toContain("$2.47");
+  });
   it("defaults to exact bridge totals rather than mixing in native-only tools", () => {
     const native = { ...row, source: "native" as const, agent: "cursor", model: "native-only", costMicros: 9000000 };
     const html = renderToStaticMarkup(createElement(UsageDashboard, {

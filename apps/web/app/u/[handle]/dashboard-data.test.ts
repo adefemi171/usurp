@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageSeriesPoint } from "@usurp/db";
-import { chartDays, colorFor, compact, filterSeries, money, number, percentage, sharesFor, summarizeSeries, treemap } from "./dashboard-data";
+import { chartDays, chartGeometry, colorFor, compact, filterSeries, money, number, percentage, sharesFor, summarizeSeries, treemap } from "./dashboard-data";
 
 const point = (overrides: Partial<UsageSeriesPoint> = {}): UsageSeriesPoint => ({
   day: "2026-05-05", agent: "vscode-copilot", model: "claude-sonnet-4-6",
@@ -64,6 +64,43 @@ describe("dashboard aggregation", () => {
   it("keeps model ids that match object prototype keys safe", () => {
     const day = chartDays([point({ model: "constructor" })], "model", "tokens")[0]!;
     expect(day.values.constructor).toBe(18880);
+  });
+});
+
+describe("chart geometry", () => {
+  const shares = [{ name: "a", value: 30 }, { name: "b", value: 10 }];
+  const days = [{ day: "2026-05-05", total: 40, values: { a: 30, b: 10 } }];
+  it("plots independent values in line mode and cumulative values in stacked mode", () => {
+    const lines = chartGeometry(days, shares, "lines");
+    const stacked = chartGeometry(days, shares, "stacked");
+    expect(lines.max).toBeCloseTo(33);
+    expect(stacked.max).toBeCloseTo(44);
+    expect(lines.series[1]!.points[0]!.y).toBeCloseTo(220 - 10 / 33 * 220);
+    expect(stacked.series[1]!.points[0]!.y).toBeCloseTo(220 - 40 / 44 * 220);
+    expect(days[0]!.values).toEqual({ a: 30, b: 10 });
+    expect(shares).toEqual([{ name: "a", value: 30 }, { name: "b", value: 10 }]);
+  });
+  it("shows a lone day as a centered point without inventing a continuous area", () => {
+    for (const style of ["lines", "stacked"] as const) {
+      const result = chartGeometry(days, shares, style);
+      expect(result.series[0]!.points[0]!.x).toBe(500);
+      expect(result.series[0]!.area).toBe("");
+      expect(result.series[0]!.line).not.toContain("L");
+    }
+  });
+  it("preserves calendar gaps at the baseline in both views", () => {
+    const rows = [point(), point({ day: "2026-05-07" })];
+    for (const style of ["lines", "stacked"] as const) {
+      const result = chartGeometry(chartDays(rows, "model", "tokens"), sharesFor(rows, "model", "tokens"), style);
+      expect(result.series[0]!.points[1]).toEqual({ x: 500, y: 220, value: 0 });
+      expect(result.series[0]!.area).toMatch(/Z$/);
+      expect(result.series[0]!.area).not.toMatch(/NaN|Infinity/);
+    }
+  });
+  it("keeps empty and zero-value selections finite", () => {
+    expect(chartGeometry([], [], "lines")).toEqual({ max: 1.1, series: [] });
+    const result = chartGeometry([{ day: "2026-05-05", total: 0, values: {} }], shares, "lines");
+    expect(result.series.every(s => s.points[0]!.y === 220)).toBe(true);
   });
 });
 

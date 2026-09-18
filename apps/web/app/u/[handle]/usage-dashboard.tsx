@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useId, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { BoardWindow, UsageSeriesPoint } from "@usurp/db";
-import { agentName, chartDays, colorFor, compact, filterSeries, formatValue, money, number, percentage, sharesFor, summarizeSeries, treemap, sessionOnly, type Grouping, type Metric } from "./dashboard-data";
+import { agentName, chartDays, chartGeometry, colorFor, compact, filterSeries, formatValue, money, number, percentage, sharesFor, summarizeSeries, treemap, sessionOnly, type ChartStyle, type Grouping, type Metric } from "./dashboard-data";
 import { efficiencyAdvice } from "./efficiency-advice";
 import styles from "./dashboard.module.css";
 
@@ -43,6 +43,8 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
     router.refresh();
   });
   const [grouping, setGrouping] = useState<Grouping>("model");
+  const [chartStyle, setChartStyle] = useState<ChartStyle>("lines");
+  const chartId = useId().replace(/:/g, "");
   const [agent, setAgent] = useState("");
   const [model, setModel] = useState("");
   const [hoverDay, setHoverDay] = useState<number | null>(null);
@@ -65,7 +67,8 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
   const costUnavailable = onlyMetadata || (totals.unpriced > 0 && !totals.cost);
   const metricUnavailable = metric === "cost" ? costUnavailable : onlyMetadata;
   const peak = days.reduce((best, d) => d.total > (best?.total ?? -1) ? d : best, days[0]);
-  const max = Math.max(1, ...days.map(d => d.total)) * 1.1;
+  const geometry = useMemo(() => chartGeometry(days, shares, chartStyle), [days, shares, chartStyle]);
+  const { max } = geometry;
   const activeIndex = Math.min(hoverDay ?? Math.max(0, days.length - 1), Math.max(0, days.length - 1));
   const activeDay = days[activeIndex];
   const models = [...new Set(rows.filter(r => !agent || r.agent === agent).map(r => r.model))].sort();
@@ -79,20 +82,6 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
   };
   const reset = () => { setAgent(""); setModel(""); setHoverDay(null); };
   const x = (i: number) => days.length > 1 ? i / (days.length - 1) * 1000 : 500;
-  const areas = useMemo(() => {
-    const x = (i: number) => days.length > 1 ? i / (days.length - 1) * 1000 : 500;
-    const y = (value: number) => 220 - value / max * 220;
-    const stacked = Array.from({ length: days.length }, () => 0);
-    return shares.map(share => {
-      const bottom = [...stacked];
-      days.forEach((d, i) => { stacked[i] = (stacked[i] ?? 0) + (d.values[share.name] ?? 0); });
-      const top = [...stacked];
-      const points = days.length === 1
-        ? `0,${y(top[0]!)} 1000,${y(top[0]!)} 1000,${y(bottom[0]!)} 0,${y(bottom[0]!)}`
-        : [...top.map((v, i) => `${x(i)},${y(v)}`), ...bottom.map((v, i) => `${x(i)},${y(v)}`).reverse()].join(" ");
-      return { name: share.name, points };
-    });
-  }, [days, shares, max]);
   const topPairs = new Map<string, { agent: string; model: string; value: number; calls: number; unpriced: number; sessions: number }>();
   for (const row of filtered) {
     if (sessionOnly(row)) continue;
@@ -175,27 +164,42 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
       </div>
     </details>
     {!filtered.length ? <section className={styles.empty}><span>◌</span><h2>No activity in this view</h2><p>Try All time or reset the model and agent filters.</p><button className={styles.linkButton} onClick={reset}>Reset filters</button></section> : <>
-      <section className={styles.panel} aria-label="Usage over time">
-        <div className={styles.panelHeader}><div><h2>{metricLabel} over time</h2><p>Daily activity · UTC{metric === "cost" && totals.unpriced ? " · Priced records only" : ""}</p></div>
-          <Segments label="Chart grouping" value={grouping} onChange={setGrouping} options={[{ value: "model", label: "Model" }, { value: "agent", label: "Agent" }]} />
+      <section className={`${styles.panel} ${styles.timePanel}`} aria-label="Usage over time">
+        <div className={styles.panelHeader}><div><h2>{metricLabel} over time</h2><p>Daily snapshots · UTC · {chartStyle === "lines" ? "Independent series" : "Stacked totals"}{metric === "cost" && totals.unpriced ? " · Priced records only" : ""}</p></div>
+          <div className={styles.chartControls}>
+            <Segments label="Chart grouping" value={grouping} onChange={setGrouping} options={[{ value: "model", label: "Model" }, { value: "agent", label: "Agent" }]} />
+            <Segments label="Chart style" value={chartStyle} onChange={setChartStyle} options={[{ value: "lines", label: "Lines" }, { value: "stacked", label: "Stacked" }]} />
+          </div>
         </div>
         {totalValue > 0 ? <>
-          <div className={styles.chartReadout} aria-live="polite"><span>{activeDay?.day}</span><strong>{formatValue(activeDay?.total ?? 0, metric)}</strong>
-            <span>{activeDay && shares.filter(s => (activeDay.values[s.name] ?? 0) > 0).map(s => `${groupLabel(s.name)}: ${formatValue(activeDay.values[s.name]!, metric)}`).join(" · ") || "No measured usage on this day"}</span></div>
+          <div className={styles.chartReadout} aria-live="polite"><span>{activeDay?.day} <span className={styles.utc}>UTC</span></span><span>Daily total <strong>{formatValue(activeDay?.total ?? 0, metric)}</strong></span></div>
           <div className={styles.chart}>
             <div className={styles.yAxis}>{[1, .75, .5, .25, 0].map(v => <span key={v}>{formatValue(max * v, metric)}</span>)}</div>
             <div className={styles.plot}>
-              <svg viewBox="0 0 1000 220" preserveAspectRatio="none" role="img" aria-label={`${metricLabel} stacked by ${grouping}, ${days[0]?.day} to ${days.at(-1)?.day}`}
+              <svg viewBox="0 0 1000 220" preserveAspectRatio="none" role="img" aria-label={`${metricLabel} ${chartStyle === "lines" ? "lines" : "stacked"} by ${grouping}, ${days[0]?.day} to ${days.at(-1)?.day}`}
                 onPointerMove={e => { const rect = e.currentTarget.getBoundingClientRect(); setHoverDay(Math.max(0, Math.min(days.length - 1, Math.round((e.clientX - rect.left) / rect.width * (days.length - 1))))); }}>
+                <defs>{geometry.series.map((s, i) => <linearGradient key={s.name} id={`${chartId}-fill-${i}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={colorFor(s.name)} stopOpacity=".2" /><stop offset="100%" stopColor={colorFor(s.name)} stopOpacity=".015" />
+                </linearGradient>)}</defs>
                 {[0, 55, 110, 165, 220].map(v => <line key={v} x1="0" y1={v} x2="1000" y2={v} className={styles.gridLine} />)}
-                {areas.map(a => <polygon key={a.name} points={a.points} fill={colorFor(a.name)} fillOpacity="0.84"><title>{groupLabel(a.name)}</title></polygon>)}
+                {[0, 250, 500, 750, 1000].map(v => <line key={`x${v}`} x1={v} y1="0" x2={v} y2="220" className={styles.gridLine} />)}
+                {geometry.series.map((s, i) => <g key={s.name}>
+                  {s.area && <path d={s.area} fill={chartStyle === "lines" ? `url(#${chartId}-fill-${i})` : colorFor(s.name)} fillOpacity={chartStyle === "lines" ? 1 : .5} />}
+                  <path className={styles.seriesLine} d={s.line} stroke={colorFor(s.name)} fill="none"><title>{groupLabel(s.name)}</title></path>
+                  {s.points[activeIndex] && <circle cx={s.points[activeIndex]!.x} cy={s.points[activeIndex]!.y} r="3" fill={colorFor(s.name)} className={styles.seriesPoint} />}
+                </g>)}
                 <line x1={x(activeIndex)} x2={x(activeIndex)} y1="0" y2="220" className={styles.crosshair} />
               </svg>
               <div className={styles.xAxis}>{[...new Set([0, Math.floor((days.length - 1) / 4), Math.floor((days.length - 1) / 2), Math.floor((days.length - 1) * .75), days.length - 1])].map(i => <span key={i}>{dateLabel(days[i]!.day)}</span>)}</div>
             </div>
           </div>
           <label className={styles.scrubber}>Inspect day<input aria-label="Inspect chart day" aria-valuetext={activeDay?.day} type="range" min="0" max={Math.max(0, days.length - 1)} value={activeIndex} onChange={e => setHoverDay(Number(e.target.value))} /></label>
-          <div className={styles.legend}>{shares.map(s => <button key={s.name} onClick={() => chooseGroup(s.name)} title={`Filter to ${groupLabel(s.name)}`}><i style={{ background: colorFor(s.name) }} />{groupLabel(s.name)}</button>)}</div>
+          <div className={styles.chartLegend} aria-label="Series values for inspected day">
+            <div className={styles.legendHeading}><span>Series · click to filter</span><span>{activeDay?.day}</span></div>
+            {shares.map(s => <button key={s.name} onClick={() => chooseGroup(s.name)} title={`Filter to ${groupLabel(s.name)}`}>
+              <i style={{ background: colorFor(s.name) }} /><span>{groupLabel(s.name)}</span><strong>{formatValue(activeDay?.values[s.name] ?? 0, metric)}</strong>
+            </button>)}
+          </div>
         </> : <div className={styles.chartEmpty}>{onlyMetadata ? "This selection contains saved conversations, but no measured tokens or cost." : metric === "cost" ? "No priced usage in this selection. Switch to Tokens to see recorded activity." : "These records contain session activity, but no measured tokens."}</div>}
       </section>
       <section className={styles.panel} aria-label="Usage attribution">
