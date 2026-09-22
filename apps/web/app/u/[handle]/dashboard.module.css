@@ -38,6 +38,11 @@
 .advice[open] > summary::after { transform: rotate(180deg); }
 .advice > summary small { margin-left: auto; color: #91a099; font-size: 11px; font-weight: 400; }
 .adviceContent { padding: 0 25px 25px; }
+.operatorRuns { margin-top: 12px; border: 1px solid #3a424c; border-radius: 10px; background: var(--panel); }
+.operatorRuns summary { cursor: pointer; display: flex; justify-content: space-between; gap: 12px; padding: 13px 16px; color: #dce5de; font-size: 12px; font-weight: 600; }
+.operatorRuns summary small { color: #8d99a7; font-size: 11px; font-weight: 400; }
+.operatorRuns > div { padding: 0 16px 15px; color: #9da9b6; font-size: 12px; line-height: 1.55; }
+.operatorRuns p { margin: 0 0 10px; }
 .adviceLink { color: #d9c18e; text-decoration: none; font-size: 12px; white-space: nowrap; }
 .adviceLink:hover { color: #f5d9a4; text-decoration: underline; }
 .adviceGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }

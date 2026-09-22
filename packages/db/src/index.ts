@@ -16,6 +16,7 @@ export {
   deviceEnrollments,
   devices,
   efficiencyFeedback,
+  missions,
   duels,
   events,
   identities,

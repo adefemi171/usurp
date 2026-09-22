@@ -406,6 +406,28 @@ export const efficiencyFeedback = pgTable(
   ],
 );
 
+/**
+ * A deliberately small, private record of an operator's intended outcome.
+ * Labels are user-authored and should be non-sensitive; Usurp never stores a
+ * prompt, code, repository, command, PR URL, or CI log as mission evidence.
+ */
+export const missions = pgTable(
+  "missions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    budgetMicros: integer("budget_micros"),
+    maxAgentRuns: integer("max_agent_runs"),
+    adviceId: text("advice_id"),
+    status: text("status").notNull().default("active"),
+    outcome: text("outcome").notNull().default("unverified"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [index("missions_user_created_idx").on(t.userId, t.createdAt)],
+);
+
 export const arenas = pgTable(
   "arenas",
   {

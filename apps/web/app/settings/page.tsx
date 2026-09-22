@@ -19,6 +19,7 @@ import {
   GLOBAL_ARENA_SLUG,
   ownedOrgs,
   duelsForUser,
+  missions,
 } from "@usurp/db";
 import { currentUser } from "../../lib/session";
 import { emailAuthEnabled } from "../../lib/env";
@@ -32,6 +33,8 @@ import {
   type NoticeCode,
   addChannelAction,
   createClubAction,
+  createMissionAction,
+  completeMissionAction,
   joinClubAction,
   joinGlobalAction,
   leaveArenaAction,
@@ -97,6 +100,9 @@ const MESSAGES: Record<NoticeCode, string> = {
     "First link and verify this email under Account security.",
   channel_email_unavailable:
     "Email delivery is not configured on this deployment.",
+  mission_created: "Operator run started.",
+  mission_completed: "Outcome recorded as self-attested.",
+  mission_invalid: "That operator run could not be saved.",
 };
 
 function notice(params: Record<string, string | string[] | undefined>) {
@@ -136,13 +142,14 @@ export default async function SettingsPage({
     typeof params.reveal === "string" ? params.reveal : undefined;
   // These reads share only the authenticated user, not one another's results.
   // Keep each helper's ownership checks; do not cache this across requests.
-  const [memberships, deviceRows, channels, revealed, orgs, duels] = await Promise.all([
+  const [memberships, deviceRows, channels, revealed, orgs, duels, missionRows] = await Promise.all([
     membershipsFor(db, user.id),
     db.select().from(devices).where(eq(devices.userId, user.id)),
     channelsFor(db, user.id),
     revealId ? revealChannelSecret(db, user.id, revealId) : null,
     ownedOrgs(db, user.id),
     duelsForUser(db, user.id),
+    db.select().from(missions).where(eq(missions.userId, user.id)).orderBy(missions.createdAt),
   ]);
 
   const inGlobal = memberships.some((m) => m.arena.slug === GLOBAL_ARENA_SLUG);
@@ -198,6 +205,7 @@ export default async function SettingsPage({
           <a href="#clubs">Clubs</a>
           <a href="#organizations">Organizations</a>
           <a href="#duels">Duels</a>
+          <a href="#operator-runs">Operator runs</a>
           <a href="#notifications">Notifications</a>
           <a href="#security">Account security</a>
         </nav>
@@ -233,6 +241,19 @@ export default async function SettingsPage({
                 {user.handleConfirmed ? "Change handle" : "Confirm handle"}
               </button>
             </form>
+          </section>
+
+          <section className="settings-section" id="operator-runs">
+            <h2 className="section">Operator runs</h2>
+            <p>Set a small goal and guardrail before using an agent. These are private, self-attested practice records—not a claim that Usurp saw your code, tests, PRs, or Runeward policy decisions.</p>
+            <form className="form" action={createMissionAction}>
+              <label className="field"><span className="field-label">Non-sensitive label</span><input className="input" name="label" minLength={2} maxLength={80} required placeholder="Example: resolve a failing check" /><span className="field-hint">Do not enter source code, prompts, repository names, links, or customer data.</span></label>
+              <div className="two-up"><label className="field"><span className="field-label">Budget (USD)</span><input className="input" name="budget_usd" type="number" min="0" max="10000" step="0.01" defaultValue="2.00" required /></label><label className="field"><span className="field-label">Maximum agent runs</span><input className="input" name="max_runs" type="number" min="1" max="999" defaultValue="5" required /></label></div>
+              <input type="hidden" name="advice_id" value="manual" /><button className="button" type="submit">Start operator run</button>
+            </form>
+            <p className="field-hint">Use <a href="https://runewardd.github.io/runeward/" target="_blank" rel="noopener noreferrer">Runeward ↗</a> when a budget or policy must actually be enforced before an agent runs. Usurp records the plan and your outcome; it does not enforce the limit itself.</p>
+            {missionRows.filter((m) => m.status === "active").map((m) => <div className="card" key={m.id}><strong>{m.label}</strong><p className="field-hint">Guardrail: ${(m.budgetMicros ?? 0) / 1_000_000} · at most {m.maxAgentRuns} agent runs · self-attested outcome</p><form className="row" action={completeMissionAction}><input type="hidden" name="mission_id" value={m.id} /><button className="button secondary" name="outcome" value="completed_under_budget">Completed under budget</button><button className="button secondary" name="outcome" value="completed_over_budget">Completed over budget</button><button className="button secondary" name="outcome" value="not_completed">Did not complete</button></form></div>)}
+            {missionRows.some((m) => m.status === "closed") && <p className="field-hint">Closed runs stay private. They will become verifiable only when you explicitly connect a privacy-safe outcome attestor.</p>}
           </section>
 
           {/* ── devices ── */}

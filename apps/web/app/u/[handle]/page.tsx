@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { efficiencyFeedback, getDb, userDashboard, type BoardWindow } from "@usurp/db";
+import { efficiencyFeedback, getDb, missions, userDashboard, type BoardWindow } from "@usurp/db";
 import { eq } from "drizzle-orm";
 import UsageDashboard from "./usage-dashboard";
 import styles from "./dashboard.module.css";
@@ -24,10 +24,11 @@ export default async function UserPage({ params, searchParams }: {
   if (!profile) notFound();
   const isOwner = viewer?.handle?.toLowerCase() === profile.handle.toLowerCase();
   // Owner-only reads stay behind both the profile gate and session ownership.
-  const [bridge, feedback] = isOwner && viewer ? await Promise.all([
+  const [bridge, feedback, operatorRuns] = isOwner && viewer ? await Promise.all([
     ownedBridge(viewer.id),
     getDb().select({ recommendation: efficiencyFeedback.recommendation, response: efficiencyFeedback.response }).from(efficiencyFeedback).where(eq(efficiencyFeedback.userId, viewer.id)),
-  ]) : [null, []];
+    getDb().select({ id: missions.id, status: missions.status, outcome: missions.outcome, budgetMicros: missions.budgetMicros }).from(missions).where(eq(missions.userId, viewer.id)),
+  ]) : [null, [], []];
   const canRefreshSource = !!bridge;
   return <main className={styles.dashboard}>
     <header className={styles.header}>
@@ -41,7 +42,7 @@ export default async function UserPage({ params, searchParams }: {
     </header>
     <UsageDashboard key={window} rows={profile.analyticsSeries} bridgeRows={profile.bridgeSeries} nativeRows={profile.usageSeries} window={window} flagged={profile.flagged}
       bridgeImports={profile.bridgeImports} canRefreshSource={canRefreshSource} isOwner={isOwner}
-      deviceCount={profile.deviceCount} lastSeen={profile.lastSeen?.toISOString() ?? null} feedback={feedback} />
+      deviceCount={profile.deviceCount} lastSeen={profile.lastSeen?.toISOString() ?? null} feedback={feedback} operatorRuns={operatorRuns} />
     <footer className={styles.footer}>
       <span>YOUR USAGE. YOUR DATA.</span>
       <p>Aggregate usage only: hourly native records and optional daily <a href="https://github.com/kenn-io/agentsview" target="_blank" rel="noopener noreferrer">AgentsView snapshots ↗</a>. Usurp does not collect project names, session titles, prompts, or code.

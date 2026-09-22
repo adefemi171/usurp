@@ -32,6 +32,7 @@ import {
   createClub,
   devices,
   getDb,
+  missions,
   joinByInviteCode,
   leaveArena,
   optInToGlobal,
@@ -81,7 +82,10 @@ export type NoticeCode =
   | "channel_not_found"
   | "channel_bad_kind"
   | "channel_email_not_verified"
-  | "channel_email_unavailable";
+  | "channel_email_unavailable"
+  | "mission_created"
+  | "mission_completed"
+  | "mission_invalid";
 
 function finish(code: NoticeCode, ok: boolean): never {
   redirect(`/settings?${ok ? "ok" : "err"}=${code}`);
@@ -266,6 +270,26 @@ export async function toggleChannelAction(formData: FormData): Promise<void> {
   if (!updated) finish("channel_not_found", false);
 
   finish(enabled ? "channel_enabled" : "channel_disabled", true);
+}
+
+export async function createMissionAction(formData: FormData): Promise<void> {
+  const user = await requireSignedIn();
+  const label = String(formData.get("label") ?? "").trim();
+  const budget = Number(formData.get("budget_usd"));
+  const runs = Number(formData.get("max_runs"));
+  if (label.length < 2 || label.length > 80 || !Number.isFinite(budget) || budget < 0 || budget > 10_000 || !Number.isInteger(runs) || runs < 1 || runs > 999) finish("mission_invalid", false);
+  await getDb().insert(missions).values({ userId: user.id, label, budgetMicros: Math.round(budget * 1_000_000), maxAgentRuns: runs, adviceId: String(formData.get("advice_id") ?? "") || null });
+  finish("mission_created", true);
+}
+
+export async function completeMissionAction(formData: FormData): Promise<void> {
+  const user = await requireSignedIn();
+  const outcome = String(formData.get("outcome") ?? "");
+  if (!["completed_under_budget", "completed_over_budget", "not_completed"].includes(outcome)) finish("mission_invalid", false);
+  const [mission] = await getDb().update(missions).set({ status: "closed", outcome, completedAt: new Date() })
+    .where(and(eq(missions.id, String(formData.get("mission_id") ?? "")), eq(missions.userId, user.id), eq(missions.status, "active"))).returning({ id: missions.id });
+  if (!mission) finish("mission_invalid", false);
+  finish("mission_completed", true);
 }
 
 export async function revokeDeviceAction(formData: FormData): Promise<void> {

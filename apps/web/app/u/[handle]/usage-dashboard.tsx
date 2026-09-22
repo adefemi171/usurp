@@ -17,12 +17,13 @@ function Segments<T extends string>({ label, options, value, onChange }: {
   </div>;
 }
 
-export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeRows, window, flagged, deviceCount, lastSeen, bridgeImports, canRefreshSource, isOwner, feedback = [] }: {
+export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeRows, window, flagged, deviceCount, lastSeen, bridgeImports, canRefreshSource, isOwner, feedback = [], operatorRuns = [] }: {
   rows: UsageSeriesPoint[]; window: BoardWindow; flagged: boolean; deviceCount: number; lastSeen: string | null;
   bridgeRows?: UsageSeriesPoint[]; nativeRows?: UsageSeriesPoint[];
   bridgeImports: Array<{ importedAt: string; pricingVersion: string; agents: string[] }>;
   canRefreshSource: boolean; isOwner: boolean;
   feedback?: Array<{ recommendation: string; response: string }>;
+  operatorRuns?: Array<{ id: string; status: string; outcome: string; budgetMicros: number | null }>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -150,6 +151,10 @@ export default function UsageDashboard({ rows: combinedRows, bridgeRows, nativeR
           {item.id === "local" && <a className={styles.runewardLink} href="https://runewardd.github.io/runeward/" target="_blank" rel="noopener noreferrer">Learn about Runeward governance ↗</a>}
         </article>)}</div>
       </div>
+    </details>}
+    {isOwner && operatorRuns.length > 0 && <details className={styles.operatorRuns}>
+      <summary><span>Operator record</span><small>{operatorRuns.filter(run => run.status === "active").length} active · {operatorRuns.filter(run => run.outcome === "completed_under_budget").length} under budget</small></summary>
+      <div><p>Outcome-aware practice record. Runs are private and self-attested; they are intentionally excluded from public ratings until a privacy-safe verifier is connected.</p><a href="/settings#operator-runs" className={styles.adviceLink}>Manage operator runs ↗</a></div>
     </details>}
     <details className={styles.coverage}>
       <summary><span>{totals.unpriced || missingUsage ? "Partial data coverage" : "Data sources & coverage"}</span><span>{onlyMetadata || !filtered.length ? "No measured usage" : unpricedModels.length ? `${unpricedModels.length} unpriced model${unpricedModels.length === 1 ? "" : "s"}` : "All measured usage priced"}{metadataModels.length ? ` · ${metadataModels.length} metadata-only model${metadataModels.length === 1 ? "" : "s"}` : ""} <span aria-hidden="true">↗</span></span></summary>
