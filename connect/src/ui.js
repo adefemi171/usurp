@@ -10,6 +10,9 @@ async function request(path, body) {
 const when = value => value ? new Date(value).toLocaleString() : 'Never';
 async function refresh() {
   state = await request('/api/state');
+  $('outcome-count').textContent = `${state.outcomeCount} checks saved on this computer.`;
+  $('outcome-status').textContent = state.outcomeStatus;
+  $('outcome-results').textContent = state.recentOutcomes.map(o => `${o.kind}: ${o.passed ? 'pass' : 'fail'} · ${o.finishedAt} · ${o.durationMs} ms`).join('\n');
   $('status').textContent = state.status; $('warning').textContent = state.warning;
   $('last-upload').textContent = when(state.lastUpload); $('last-attempt').textContent = when(state.lastAttempt);
   $('device').textContent = state.deviceId ? `Connected as @${state.handle} · ${state.deviceId}` : 'No account connected.';
@@ -25,6 +28,8 @@ async function refresh() {
   $('dashboard').hidden = !state.deviceId;
   $('dashboard').href = `${state.server}/u/${encodeURIComponent(state.handle || '')}?window=all`;
   if (initial) {
+    $('outcome-consent').checked = state.outcomeSync.enabled;
+    $('outcome-server').value = state.outcomeSync.server;
     $('server').value = state.server;
     document.querySelectorAll('#sources input').forEach(input => { input.checked = state.agents.includes(input.value); });
     for (const key of ['bridge', 'all', 'consent']) $(key).checked = state[key];
@@ -48,6 +53,7 @@ on('pair', async () => { await action('save', choices(false)); await action('pai
 on('cancel', () => action('cancel'));
 on('save', () => action('save', choices()));
 on('sync', () => action('sync'));
+on('save-outcome-sync', () => action('outcome-sync', {enabled: $('outcome-consent').checked, server: $('outcome-server').value.trim()}));
 on('pause', () => action(state.paused ? 'resume' : 'pause'));
 on('disconnect', async () => { if (confirm('Delete this service’s local device key and stop syncing? Existing cloud data remains. Revoke the old device in website Settings.')) { await action('disconnect'); initial = true; } });
 on('save-startup', () => request('/api/action', {action:'startup', enabled: $('startup').checked}));

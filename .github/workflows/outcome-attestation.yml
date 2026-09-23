@@ -1,0 +1,52 @@
+name: Attest Usurp CI outcome
+on:
+  workflow_run:
+    workflows: [Verify Usurp]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  attest:
+    # Trust only the upstream run for a push in this repository, never fork PR code.
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:connect
+      - name: Sign the completed workflow result and sync
+        env:
+          USURP_DEVICE_KEY: ${{ secrets.USURP_OUTCOME_KEY }}
+          OUTCOME_SERVER: ${{ vars.USURP_OUTCOME_SERVER }}
+          OUTCOME_OWNER: ${{ vars.USURP_OUTCOME_OWNER }}
+        shell: bash
+        run: |
+          if [ -z "$USURP_DEVICE_KEY" ] || [ -z "$OUTCOME_SERVER" ] || [ -z "$OUTCOME_OWNER" ]; then
+            echo 'Outcome attestation is unconfigured; see connect/OUTCOMES.md.'
+            exit 0
+          fi
+          # Repository/run ID is used only locally to make a stable opaque UUID.
+          mission_id=$(node -e 'const c=require("node:crypto"),e=require(process.env.GITHUB_EVENT_PATH);const h=c.createHash("sha256").update(e.repository.id+":"+e.workflow_run.id).digest("hex");console.log(h.slice(0,8)+"-"+h.slice(8,12)+"-4"+h.slice(13,16)+"-8"+h.slice(17,20)+"-"+h.slice(20,32))')
+          node connect/dist/main.cjs mission-start --id "$mission_id" --label 'CI verification' --data-dir .outcome-state
+          # Linking proof contains a public key and account-bound signature, never the private key.
+          node connect/dist/main.cjs attestor-link --owner "$OUTCOME_OWNER" --data-dir .outcome-state
+          result=0
+          node connect/dist/main.cjs attest --kind ci --mission "$mission_id" --data-dir .outcome-state -- node -e 'const e=require(process.env.GITHUB_EVENT_PATH);process.exit(e.workflow_run.status==="completed"&&e.workflow_run.conclusion==="success"?0:1)' || result=$?
+          node connect/dist/main.cjs attest-sync --server "$OUTCOME_SERVER" --data-dir .outcome-state
+          exit "$result"
+      - name: Retain signed queue for recovery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: outcome-proofs
+          path: .outcome-state/outcomes/*.json
+          if-no-files-found: ignore
+          retention-days: 14

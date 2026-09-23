@@ -7,6 +7,7 @@ import { generateDeviceKeyPair } from "../../packages/protocol/src/keys.js";
 import { loadConfig, saveConfig } from "../../packages/cli/src/config.js";
 import { loadKey, saveKey, deleteKey } from "../../packages/cli/src/keystore.js";
 import { serverOrigin, sourceSelection, cleanEnvironment } from "./policy.js";
+import { outcomeSyncPreference, saveOutcomeSyncPreference, syncOutcomes, readOutcomes } from "./outcomes.js";
 
 type Preferences = { server: string; agents: string[]; bridge: boolean; all: boolean; consent: boolean; paused: boolean; imported: boolean; lastAttempt?: string; lastUpload?: string };
 type Pending = { code: string; token: string; publicKey: string; expiresAt: string; server: string };
@@ -19,6 +20,9 @@ export class Controller {
   warning = "";
   nextSync = 0;
   failures = 0;
+  private nextOutcomeSync = 0;
+  private outcomeBusy = false;
+  outcomeStatus = "Outcome proofs remain local until you enable sharing.";
   private locked = false;
   private stopped = false;
   private child?: ReturnType<typeof fork>;
@@ -49,7 +53,9 @@ export class Controller {
   }
   async state() {
     const c = await loadConfig();
-    return { ...this.prefs, deviceId: c.deviceId, handle: c.handle, busy: this.busy, status: this.status, warning: this.warning,
+    const outcomeSync = await outcomeSyncPreference(this.directory);
+    const outcomes = (await readOutcomes(this.directory)).map(r => r.outcome).sort((a, b) => a.finishedAt.localeCompare(b.finishedAt));
+    return { ...this.prefs, outcomeSync, outcomeStatus: this.outcomeStatus, outcomeCount: outcomes.length, recentOutcomes: outcomes.slice(-10), deviceId: c.deviceId, handle: c.handle, busy: this.busy, status: this.status, warning: this.warning,
       nextSync: this.nextSync, pairing: this.pending ? { code: this.pending.code, expiresAt: this.pending.expiresAt,
         url: `${this.pending.server}/connect/approve?code=${encodeURIComponent(this.pending.code)}` } : null };
   }
@@ -66,6 +72,13 @@ export class Controller {
     if (this.locked) throw new Error("An operation is in progress. Please try again shortly.");
     this.locked = true;
     try {
+      if (name === "outcome-sync") {
+        if (typeof value.enabled !== "boolean") throw new Error("Invalid sharing preference.");
+        await saveOutcomeSyncPreference(this.directory, value.enabled, value.server);
+        this.nextOutcomeSync = 0;
+        this.outcomeStatus = value.enabled ? "Outcome sync enabled. Retrying while online." : "Outcome sync disabled. An upload already in progress may finish.";
+        return;
+      }
       if (name === "pause") { this.prefs.paused = true; await this.persist(); this.status = this.busy ? "Pausing after the current upload finishes." : "Sync is paused."; return; }
       if (this.busy) throw new Error("Wait for the current sync to finish.");
       if (name === "resume") {
@@ -113,6 +126,10 @@ export class Controller {
   }
   async tick() {
     if (this.stopped || this.locked || this.busy) return;
+    if (!this.outcomeBusy && Date.now() >= this.nextOutcomeSync) {
+      this.outcomeBusy = true;
+      void this.syncOutcomeQueue().finally(() => { this.outcomeBusy = false; this.nextOutcomeSync = Date.now() + 60000; });
+    }
     this.locked = true;
     try {
       if (this.pending) {
@@ -132,6 +149,17 @@ export class Controller {
   private startSync() {
     if (this.stopped) return;
     void this.runSync().catch(() => { this.prefs.paused = true; this.status = "Cannot save local sync state. Sync paused; check disk space and folder permissions."; });
+  }
+  private async syncOutcomeQueue() {
+    try {
+      const prefs = await outcomeSyncPreference(this.directory);
+      if (!prefs.enabled || this.stopped) return;
+      const sent = await syncOutcomes(this.directory, prefs.server, fetch, async () => {
+        const current = await outcomeSyncPreference(this.directory);
+        return !this.stopped && current.enabled && current.server === prefs.server;
+      });
+      this.outcomeStatus = sent ? `${sent} outcome uploads confirmed.` : "All queued outcomes acknowledged.";
+    } catch { this.outcomeStatus = "Outcome sync unavailable. Results remain local; retrying in one minute. Check linking and connectivity."; }
   }
   private execute(options: { agents: string[]; bridge: boolean; all: boolean }): Promise<SyncResult> {
     if (this.runner) return this.runner(options);

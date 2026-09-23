@@ -78,6 +78,7 @@ export default function BoardNav({
           Burn
           <NavigationPending />
         </Link>
+        <Link className="tab" href="/outcomes">Verified outcomes</Link>
         {/* `#5.1` — a second axis to compete on, so being dethroned still
             leaves a record. Reachable from the board it matters on. */}
       </nav>

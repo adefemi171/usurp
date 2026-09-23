@@ -6,7 +6,7 @@
   "type": "commonjs",
   "engines": { "node": ">=22.13.0" },
   "bin": { "usurp-connect": "dist/main.cjs" },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": ["dist", "README.md", "OUTCOMES.md", "LICENSE"],
   "optionalDependencies": { "@napi-rs/keyring": "1.2.0" },
   "repository": { "type": "git", "url": "git+https://github.com/adefemi171/usurp.git", "directory": "connect" }
 }

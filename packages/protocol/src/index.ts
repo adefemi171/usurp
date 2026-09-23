@@ -1,4 +1,5 @@
 export { canonicalJson, canonicalBytes, CanonicalJsonError } from "./canonical.js";
+export { outcomeSchema, signedOutcomeSchema, signOutcome, verifyOutcome, trustedAttestors, experimentSummary, type Outcome, type SignedOutcome } from "./outcomes.js";
 export { bridgeSnapshotSchema, bridgeUrl, fetchBridgeSnapshot, type BridgeSnapshot } from "./bridge.js";
 
 export {

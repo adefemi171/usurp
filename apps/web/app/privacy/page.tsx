@@ -26,6 +26,11 @@ export default function PrivacyPage() {
         </p>
       </section>
       <section className="settings-section">
+        <h2>Optional outcome proofs</h2>
+        <p>Local missions and checks work offline. If you link an attestor and choose to sync, we store its public key, signature, random mission and experiment identifiers, check type, pass/fail, and timestamps. Local mission labels, commands, output, PR URLs and code are excluded. Labels entered directly into website Operator Runs are stored privately on the server.</p>
+        <p>Outcome sharing requires separate consent, visible Global membership, and operator approval of the attestor. Account deletion removes linked attestors and their receipts from the active database. Local files remain under your control.</p>
+      </section>
+      <section className="settings-section">
         <h2>You choose where you appear</h2>
         <p>
           Browsing public boards does not require an account. Joining the global

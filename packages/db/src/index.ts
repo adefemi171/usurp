@@ -17,6 +17,8 @@ export {
   devices,
   efficiencyFeedback,
   missions,
+  outcomeAttestors,
+  outcomeReceipts,
   duels,
   events,
   identities,
@@ -37,6 +39,7 @@ export {
 } from "./schema.js";
 
 export { closeDb, connectionString, getDb, getSql, type Db } from "./client.js";
+export { acceptOutcome, outcomeBoard } from "./outcomes.js";
 
 export {
   ingest,

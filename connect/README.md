@@ -79,6 +79,23 @@ ports, tunnels, administrator privileges, or GitHub credentials are needed.
 Website Refresh view reloads already stored data; use Sync now in local controls
 to collect immediately. Remote website-triggered sync is not implemented here.
 
+## Offline outcome verification
+
+Create a local mission with `usurp-connect mission-start --label "Local check"`.
+Use the returned ID with `usurp-connect attest --mission ID -- npm test`.
+No account, background service or internet connection is needed by Connect for
+these operations. `mission-list` shows results. `experiment-report --experiment UUID`
+compares baseline/intervention check durations and pass rates.
+
+Link the outcome key explicitly in website Settings, then use `attest-sync --server URL`
+or enable automatic outcome sharing in local browser controls. Proofs remain on
+disk until acknowledged and are retained afterward for local reports. Usage-sync
+consent does not grant outcome-sync consent. Optional `attest-pr` requires GitHub
+connectivity; local test verification does not.
+
+See [the complete verification guide](OUTCOMES.md) for trust,
+privacy, CI setup and experiment examples.
+
 ## Remove
 
 Disable start at login in local controls, disconnect (deletes this service's

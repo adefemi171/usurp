@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Controller } from "./controller.js";
 import { loadConfig, saveConfig } from "../../packages/cli/src/config.js";
 import { serverOrigin, sourceSelection } from "./policy.js";
+import { outcomeSyncPreference, saveOutcomeSyncPreference } from "./outcomes.js";
 const { keys } = vi.hoisted(() => ({ keys: new Map<string, string>() }));
 vi.mock("../../packages/cli/src/keystore.js", () => ({
   saveKey: vi.fn(async (id, key) => { keys.set(id, key); }),
@@ -19,6 +20,16 @@ async function connected(runner = vi.fn(async (_options?: any) => ({ ok: true, u
   const c = new Controller(root, runner); await c.init(); await c.action("save", options); await saveConfig({ apiUrl: options.server, seq: 1, deviceId: "dev_TEST", handle: "tester" }); keys.set("dev_TEST", "private"); return { c, runner };
 }
 describe("browser companion consent and recovery", () => {
+  it("keeps outcome upload consent separate and persists disabling it", async () => {
+    const c = new Controller(root); await c.init();
+    expect((await outcomeSyncPreference(root)).enabled).toBe(false);
+    await c.action("outcome-sync", { enabled: true, server: "https://proofs.example" });
+    expect(await outcomeSyncPreference(root)).toEqual({ enabled: true, server: "https://proofs.example" });
+    expect(c.prefs.consent).toBe(false);
+    await c.action("outcome-sync", { enabled: false, server: "https://proofs.example" });
+    expect((await new Controller(root).state()).outcomeSync.enabled).toBe(false);
+    await expect(c.action("outcome-sync", { enabled: "true", server: "https://proofs.example" })).rejects.toThrow("Invalid");
+  });
   it("never collects before consent", async () => { const runner = vi.fn(); const c = new Controller(root, runner); await c.init(); await c.tick(); await c.runSync(); expect(runner).not.toHaveBeenCalled(); expect((await c.state()).paused).toBe(true); });
   it("requires sources and boolean consent", async () => { const c = new Controller(root); await c.init(); await expect(c.action("save", {...options, agents:[]})).rejects.toThrow("source"); await expect(c.action("save", {...options, consent:"yes"})).rejects.toThrow("Invalid"); });
   it("never treats no-data check as an upload", async () => { const {c} = await connected(vi.fn(async () => ({ok:true,uploaded:false,warnings:0}))); await c.runSync(); expect(c.prefs.lastAttempt).toBeTruthy(); expect(c.prefs.lastUpload).toBeUndefined(); expect(c.status).toContain("Nothing was uploaded"); });

@@ -29,6 +29,7 @@ import { DeleteAccount } from "./delete-account";
 import { Organizations } from "./organizations";
 import { Duels } from "./duels";
 import { ManualImport } from "./manual-import";
+import { Attestors } from "./attestors";
 import {
   type NoticeCode,
   addChannelAction,
@@ -206,6 +207,7 @@ export default async function SettingsPage({
           <a href="#organizations">Organizations</a>
           <a href="#duels">Duels</a>
           <a href="#operator-runs">Operator runs</a>
+          <a href="#attestors">Outcome verification</a>
           <a href="#notifications">Notifications</a>
           <a href="#security">Account security</a>
         </nav>
@@ -256,6 +258,7 @@ export default async function SettingsPage({
             {missionRows.some((m) => m.status === "closed") && <p className="field-hint">Closed runs stay private. They will become verifiable only when you explicitly connect a privacy-safe outcome attestor.</p>}
           </section>
 
+          <Attestors userId={user.id} />
           {/* ── devices ── */}
           <section className="settings-section" id="devices">
             <h2 className="section">Devices & sync</h2>

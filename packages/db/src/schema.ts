@@ -428,6 +428,22 @@ export const missions = pgTable(
   (t) => [index("missions_user_created_idx").on(t.userId, t.createdAt)],
 );
 
+/** Explicit opt-in linking of an offline signing key to a website account. */
+export const outcomeAttestors = pgTable("outcome_attestors", {
+  publicKey: text("public_key").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  share: boolean("share").notNull().default(false),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export const outcomeReceipts = pgTable("outcome_receipts", {
+  id: uuid("id").primaryKey(),
+  publicKey: text("public_key").notNull().references(() => outcomeAttestors.publicKey, { onDelete: "cascade" }),
+  missionId: uuid("mission_id").notNull(),
+  payload: jsonb("payload").$type<import("@usurp/protocol").SignedOutcome>().notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+}, t => [index("outcome_receipts_key_mission_idx").on(t.publicKey, t.missionId)]);
+
 export const arenas = pgTable(
   "arenas",
   {

@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Controller } from "./controller.js";
 import { serve } from "./server.js";
 import { cleanEnvironment, serverOrigin } from "./policy.js";
+import { outcomeCommand } from "./outcomes.js";
 
 const args = process.argv.slice(2);
 const option = (name: string) => { const i = args.indexOf(name); if (i < 0) return undefined; if (!args[i+1] || args[i+1].startsWith("--")) throw new Error(`Missing value for ${name}`); return args[i+1]; };
@@ -25,10 +26,18 @@ function openBrowser(url: string) {
   child.on("error", () => console.log("Could not open a browser automatically. Use the local URL printed above.")); child.unref();
 }
 async function main() {
-  if (args.includes("--help") || args[0] === "help") {
+  const controls = args.includes("--") ? args.slice(0, args.indexOf("--")) : args;
+  if (controls.includes("--help") || args[0] === "help") {
+    console.log("Offline outcomes:\n  mission-start --label TEXT --budget 2 --max-runs 5\n  mission-list\n  attest --mission UUID [--kind test|ci] [--timeout-seconds 600] -- COMMAND ARGS\n  attest-pr --mission UUID --pr https://github.com/OWNER/REPO/pull/NUMBER (online)\n  attestor-link --owner ACCOUNT_UUID\n  attest-sync --server URL\n  experiment-report --experiment UUID\nMission experiments: --experiment UUID --variant baseline|intervention\nAll accept --data-dir PATH. Offline results stay private until explicitly synced.\n");
     console.log("Usurp Connect\n\n  usurp-connect                 Start in background and open local controls\n  usurp-connect start --no-open  Start without opening a browser\n  usurp-connect status           Show connection and last upload\n  usurp-connect stop             Stop this background service\n  usurp-connect serve            Run in the foreground\n\nOptions: --server https://usurp.onrender.com --port 43127 --data-dir PATH\nEnable start at login, choose sources, pause, or disconnect in the local controls.\nNode.js 22.13+ required. Keys stay in the OS keychain. No sources enabled by default."); return;
   }
   const command = args[0] && !args[0].startsWith("--") ? args[0] : "start";
+  if (["mission-start", "mission-list", "attest", "attest-pr", "attest-sync", "attestor-link", "experiment-report"].includes(command)) {
+    const localArgs = args.includes("--") ? args.slice(0, args.indexOf("--")) : args;
+    const index = localArgs.indexOf("--data-dir");
+    if (index >= 0 && !localArgs[index + 1]) throw new Error("Missing --data-dir value");
+    process.exitCode = await outcomeCommand(args, resolve(index < 0 ? join(homedir(), ".usurp-connect") : localArgs[index + 1]!)); return;
+  }
   if (!["start", "serve", "status", "stop"].includes(command)) throw new Error("Unknown command. Run usurp-connect --help.");
   const directory = resolve(option("--data-dir") ?? join(homedir(), ".usurp-connect"));
   const port = Number(option("--port") ?? 43127);
