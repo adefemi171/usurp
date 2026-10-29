@@ -4,6 +4,7 @@
   "private": true,
   "description": "Usurp ingest API and Burn board",
   "license": "MIT",
+  "engines": { "node": "^22.23.4 || ^24.22.1 || ^26.12.1" },
   "scripts": {
     "dev": "next dev --port ${PORT:-3000}",
     "build": "next build",
