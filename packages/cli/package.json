@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Usurp CLI — sync your AI coding-agent usage to the league",
   "license": "MIT",
+  "engines": { "node": "^22.23.4 || ^24.22.1 || ^26.12.1" },
   "type": "module",
   "bin": {
     "usurp": "./dist/main.js"

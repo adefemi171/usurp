@@ -4,7 +4,7 @@
   "description": "Local browser setup and background usage sync for Usurp",
   "license": "MIT",
   "type": "commonjs",
-  "engines": { "node": ">=22.13.0" },
+  "engines": { "node": "^22.23.4 || ^24.22.1 || ^26.12.1" },
   "bin": { "usurp-connect": "dist/main.cjs" },
   "files": ["dist", "README.md", "OUTCOMES.md", "LICENSE"],
   "optionalDependencies": { "@napi-rs/keyring": "1.2.0" },

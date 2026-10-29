@@ -3,7 +3,7 @@
 # workspace, which is why the web build is not `output: "standalone"`.
 
 # ── build ───────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+FROM node:22.23.4-alpine AS build
 
 WORKDIR /app
 
@@ -37,7 +37,7 @@ RUN npm run build:connect
 RUN --mount=type=cache,target=/root/.cache/next-swc npm -w @usurp/web run build
 
 # ── runner ──────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS runner
+FROM node:22.23.4-alpine AS runner
 
 WORKDIR /app
 
