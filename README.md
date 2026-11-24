@@ -2,7 +2,7 @@
 
 Track AI coding-tool usage, estimated cost, coaching experiments and signed checks
 on your own computer. No Render account, GitHub OAuth app, email provider or public
-deployment is needed. The hosted service is being retired.
+deployment is needed. The hosted service has been retired.
 
 ## Start locally
 
@@ -32,6 +32,32 @@ The dashboard binds to `127.0.0.1:3000`; PostgreSQL binds to `127.0.0.1:5433`.
 Data lives in `usurp-local_pgdata` and survives stopping/restarting. Never use
 `down --volumes` unless you intend to erase it. Do not expose the dashboard
 through public ports, tunnels or reverse proxies.
+
+### Docker without a host Node installation
+
+The multi-stage `Dockerfile` builds the app and Connect installer and runs the
+application as an unprivileged user. Compose starts PostgreSQL, waits for it to
+be healthy, applies migrations, then starts the dashboard and scoring worker.
+Only Docker with Compose is required for this alternative:
+
+```sh
+# First installation only; refuses to overwrite an existing .env.local.
+docker run --rm -v "$PWD:/workspace" -w /workspace node:22.23.4-alpine node scripts/local.mjs setup
+docker compose --env-file .env.local --project-name usurp-local up --build -d --wait
+
+# Subsequent starts with cached images, including offline use:
+docker compose --env-file .env.local --project-name usurp-local up --no-build --pull never -d --wait
+
+# Stop and remove containers and the network; preserve the database volume:
+docker compose --env-file .env.local --project-name usurp-local down
+```
+
+Run these commands from the repository root. Use the same `usurp-local` project
+name each time to reuse the database volume. Services start only when requested;
+they do not automatically restart when Docker or the computer restarts. Secrets
+are read at startup from `.env.local` and excluded from the image and Git.
+Usurp Connect runs separately on the host so it can read the sources you approve;
+stopping Compose does not stop a separately installed collector.
 
 ## Collect usage
 

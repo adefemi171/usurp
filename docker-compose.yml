@@ -1,8 +1,8 @@
 # Usurp — local-only application stack. Do not publish through a tunnel/proxy.
 #
-#   docker compose up -d          # postgres, migrations, then the board on :3000
-#   docker compose run --rm enroll --handle kenn
-#   docker compose logs -f web
+#   npm run local:setup          # generate private .env.local once
+#   npm run local:up             # build and start the Docker stack
+#   npm run local:stop           # stop without deleting data
 #
 # The development server can use the same PostgreSQL service.
 
@@ -11,7 +11,7 @@ name: usurp
 services:
   postgres:
     image: postgres:17-alpine
-    restart: unless-stopped
+    restart: "no"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-usurp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD in .env}
@@ -21,8 +21,7 @@ services:
       # itself per deployment is a bug report waiting to happen.
       POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
     ports:
-      # Exposed for the local dev loop and `npm run db:generate`. Drop this
-      # line on a real deployment; nothing outside the compose network needs it.
+      # Loopback only, for the local development tools.
       # 5432 is commonly occupied by a local Postgres/OrbStack instance.
       # Keep the container on its conventional port while choosing 5433 on
       # the host by default; set POSTGRES_PORT=5432 if that port is free.
@@ -68,7 +67,7 @@ services:
     build:
       context: .
       target: runner
-    restart: unless-stopped
+    restart: "no"
     environment:
       # Composed from POSTGRES_* with the service name as the host, NOT
       # interpolated from the host's DATABASE_URL. That variable points at
@@ -83,14 +82,8 @@ services:
       USURP_LOCAL_ONLY: "1"
       USURP_LOCAL_PASSWORD: ${USURP_LOCAL_PASSWORD:?Generate a local password in .env}
       USURP_LOCAL_OWNER_ID: ${USURP_LOCAL_OWNER_ID:-}
-      # OAuth configuration must be explicitly forwarded: Compose reads .env
-      # for interpolation, but does not otherwise inject it into containers.
       USURP_BASE_URL: ${USURP_BASE_URL:-http://localhost:3000}
       AUTH_SECRET: ${AUTH_SECRET:-}
-      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
-      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-}
       USURP_AGENTS_VIEW_URL: ${USURP_AGENTS_VIEW_URL:-}
       USURP_AGENTS_VIEW_DEVICE_ID: ${USURP_AGENTS_VIEW_DEVICE_ID:-}
     ports:
@@ -119,7 +112,7 @@ services:
       context: .
       target: runner
     command: ["npm", "-w", "@usurp/db", "run", "worker"]
-    restart: unless-stopped
+    restart: "no"
     environment:
       DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgres://${POSTGRES_USER:-usurp}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-usurp}}
       DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
@@ -127,8 +120,6 @@ services:
       NODE_ENV: production
       USURP_BASE_URL: ${USURP_BASE_URL:-http://localhost:3000}
       USURP_LOCAL_ONLY: "1"
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-}
     depends_on:
       postgres:
         condition: service_healthy
