@@ -362,6 +362,7 @@ export interface Transport {
  */
 export const httpTransport: Transport = {
   async send(channel, payload) {
+    if (process.env.USURP_LOCAL_ONLY === "1") return { ok: false, error: "External notifications are disabled in local-only mode" };
     if (channel.kind === "email") {
       if (!emailNotificationsEnabled())
         return {
@@ -430,6 +431,7 @@ export const httpTransport: Transport = {
 };
 
 export function emailNotificationsEnabled() {
+  if (process.env.USURP_LOCAL_ONLY === "1") return false;
   return Boolean(
     process.env.RESEND_API_KEY?.trim() && process.env.AUTH_EMAIL_FROM?.trim(),
   );
@@ -464,6 +466,7 @@ export async function dispatchNotifications(
   db: Db,
   options: DispatchOptions = {},
 ): Promise<DispatchSummary> {
+  if (process.env.USURP_LOCAL_ONLY === "1") return { considered: 0, sent: 0, suppressed: 0, failed: 0 };
   const now = options.now ?? new Date();
   const transport = options.transport ?? httpTransport;
   const limit = options.limit ?? 200;

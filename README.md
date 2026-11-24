@@ -1,133 +1,108 @@
-# Usurp
+# Usurp — local only
 
-Track your AI coding-tool usage, compare activity by model and tool, and compete
-in seasonal arenas with a public handle.
+Track AI coding-tool usage, estimated cost, coaching experiments and signed checks
+on your own computer. No Render account, GitHub OAuth app, email provider or public
+deployment is needed. The hosted service has been retired.
 
-## Get started
+## Start locally
 
-1. Visit your Usurp website and sign in with GitHub or email, when enabled.
-2. Open **Connect** and install Usurp Connect using the command shown there.
-3. Run `usurp-connect`, approve the device pairing, and select the sources you
-   want to share.
-4. Confirm the first upload in the local controls, then open **My usage**.
-
-You do not need to clone this repository or run Docker to connect a device.
-Usurp Connect requires Node.js 22.13 or newer. See the
-[Connect guide](connect/README.md) for installation, controls, and removal.
-
-Public boards can be viewed without signing in. Joining the global arena is a
-separate opt-in under **Settings**. You can also create or join a private club.
-
-Use the same account on multiple computers, pairing each computer separately.
-Run one automatic collector per computer. Signing in or pairing alone does not
-upload usage; you must select sources and approve syncing.
-
-To add email sign-in to an existing GitHub account, link it in
-**Settings → Account security** first. Accounts are not automatically merged by
-matching email addresses.
-
-## Usage and rankings
-
-- **My usage** shows daily activity by model and coding tool, with filters and
-  charts. Native readers support Claude Code, Codex, Cursor, and VS Code Copilot.
-- **AgentsView** is an optional local source for additional tools and its
-  calculated usage summaries. It is not required for native readers.
-- **Burn** compares usage volume. **Rating** combines activity, efficiency, and
-  consistency for seasonal competition.
-- Eligible Rating members can earn **Sovereign**, **Usurper**, or **Contender**.
-  The Hall of Fame records reigns, including those still in progress.
-
-The Rating arena shows consecutive-day streaks from signed, non-historical
-activity, counting each UTC day once across devices. A streak ending yesterday
-remains current while today is in progress. Bridge-only summaries and manual
-imports do not earn competitive streaks.
-
-To show coding-tool badges beneath your handle, enable **Show my coding tools**
-for that arena in **Settings → Arenas & visibility**. Sharing is off by default,
-uses measured activity from the last 30 days, and is suppressed for anonymous
-or hidden members. Models stay in the usage dashboard. Tool badges do not affect
-ratings.
-
-Cost figures are estimates or source-calculated totals, not provider invoices.
-Missing usage or pricing is marked unavailable, not treated as zero. Some tools
-do not expose complete token or model records.
-
-Refreshing the website reloads stored data. Use **Sync now** in the local
-controls to collect new usage. Background syncing requires an awake, connected
-computer and an available Usurp server.
-
-## Privacy
-
-Usage uploads contain aggregate counters, not prompts, code, file paths,
-project names, or conversation titles. Device signing keys stay on the device,
-normally in the OS keychain. A signed upload establishes device provenance;
-it does not certify that every reported counter is accurate.
-
-Public identity uses your handle rather than your account's real name. Arena
-visibility is configurable, and devices can be revoked in Settings.
-
-## Self-host with Docker
-
-From a checkout of this repository, with Node.js 22.13+ and Docker installed:
+Install Docker and a supported patched Node runtime (see `package.json`). From
+this checkout:
 
 ```sh
-node scripts/init-env.mjs
+npm run local:setup
+npm run local:up
 ```
 
-This creates a private `.env` with generated database and session secrets,
-without overwriting an existing file. Configure the settings described in
-[.env.example](.env.example), then start the application:
+Open [the local dashboard](http://localhost:3000/signin). Use
+`USURP_LOCAL_PASSWORD` from the private `.env.local` file. Setup generates random
+owner, database and session secrets without overwriting `.env` or an existing
+`.env.local`. Never publish these files or share the password.
+
+The first build downloads images and dependencies. After that, start offline:
 
 ```sh
-docker compose up -d --build
+npm run local:start
+npm run local:status
+npm run local:stop
 ```
 
-Open `http://localhost:3000`. Compose starts PostgreSQL, applies migrations,
-and runs both the web application and background worker. PostgreSQL binds to
-localhost on port 5433 by default; choose an unused `POSTGRES_PORT` if needed.
-Keep the host-side `DATABASE_URL` port consistent with that setting.
+PostgreSQL, migrations, dashboard and scoring worker all run on this computer.
+The dashboard binds to `127.0.0.1:3000`; PostgreSQL binds to `127.0.0.1:5433`.
+Data lives in `usurp-local_pgdata` and survives stopping/restarting. Never use
+`down --volumes` unless you intend to erase it. Do not expose the dashboard
+through public ports, tunnels or reverse proxies.
 
-For sign-in, configure:
+### Docker without a host Node installation
 
-- `USURP_BASE_URL`: the public origin of your installation.
-- `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: your GitHub OAuth app, with
-  callback URL `<your-origin>/auth/github/callback`.
-- `RESEND_API_KEY` and `AUTH_EMAIL_FROM`: optional email sign-in using a verified
-  sending domain.
+The multi-stage `Dockerfile` builds the app and Connect installer and runs the
+application as an unprivileged user. Compose starts PostgreSQL, waits for it to
+be healthy, applies migrations, then starts the dashboard and scoring worker.
+Only Docker with Compose is required for this alternative:
 
-Keep secrets in the deployment environment, never in Git. Public installations
-must use HTTPS. Changing `POSTGRES_PASSWORD` in `.env` does not rotate the
-password of an existing database volume.
+```sh
+# First installation only; refuses to overwrite an existing .env.local.
+docker run --rm -v "$PWD:/workspace" -w /workspace node:22.23.4-alpine node scripts/local.mjs setup
+docker compose --env-file .env.local --project-name usurp-local up --build -d --wait
+
+# Subsequent starts with cached images, including offline use:
+docker compose --env-file .env.local --project-name usurp-local up --no-build --pull never -d --wait
+
+# Stop and remove containers and the network; preserve the database volume:
+docker compose --env-file .env.local --project-name usurp-local down
+```
+
+Run these commands from the repository root. Use the same `usurp-local` project
+name each time to reuse the database volume. Services start only when requested;
+they do not automatically restart when Docker or the computer restarts. Secrets
+are read at startup from `.env.local` and excluded from the image and Git.
+Usurp Connect runs separately on the host so it can read the sources you approve;
+stopping Compose does not stop a separately installed collector.
+
+## Collect usage
+
+Open [Connect](http://localhost:3000/connect), install its locally served package,
+and run `usurp-connect --server http://localhost:3000`. Pair with your local
+account, select sources and approve local syncing. No source is selected for you.
+Native readers support Claude Code, Codex, Cursor and VS Code Copilot.
+[AgentsView](https://github.com/kenn-io/agentsview) is an optional local source.
+
+Upgraded Connect pauses old hosted pairings and rejects remote upload addresses.
+Disconnect the old pairing, then pair locally. Identity and consent are never
+silently redirected to a new database. Stop old installed collectors before
+upgrading; run only one collector per computer.
+
+The dashboard, collection, estimated pricing, scoring and local test proofs work
+without internet after installation. Commands you explicitly run as checks may
+need their own network. Optional GitHub PR verification needs GitHub; offline
+tests do not. Email, Slack and webhook delivery are disabled in the local stack.
+The existing Global and outcome arenas show this installation's data only,
+not an online competition. Estimated costs are not provider invoices.
+
+## Data and verification
+
+This installation starts fresh. Hosted history is not automatically downloaded,
+merged or restored. The owner's retirement decision is to delete old hosted data
+and its backup copies, rather than migrate it.
+
+See [Connect controls](connect/README.md) and
+[offline outcomes](connect/OUTCOMES.md). Local signatures authenticate their
+reporter, not independent task quality. Experiments compare observed check times
+and pass rates; they are not causal evidence, RL or measured AI cost savings.
 
 ## Development
 
 ```sh
 npm ci
-npm run build
-node scripts/init-env.mjs   # new installations only
-docker compose up -d postgres
-npm run db:migrate
-npm run web
+npm run typecheck
+npm run typecheck:connect
+npm run build:web
 ```
 
-Run `npm run worker` in another terminal to process background jobs. Local
-development sign-in is disabled in production.
-
-Useful commands:
-
-| Command | Purpose |
-| --- | --- |
-| `npm run build:web` | Build the production web app and Connect package |
-| `npm run typecheck` | Check the workspace types |
-| `npm run typecheck:connect` | Check Connect types |
-| `npm test` | Run tests; use an isolated test database, never production |
-| `npm run simulate` | Check the rating model's simulation gate |
-| `npm run db:migrate` | Apply database migrations |
-| `npm run usurp -- preview` | Preview a CLI usage upload |
-| `npm run usurp -- sync` | Upload usage from an enrolled CLI device |
-
-Database-dependent tests skip when `DATABASE_URL` is absent. The test runner
-loads `.env` if present, so explicitly select an isolated database before testing.
+Run tests with an explicitly isolated `DATABASE_URL`: the test runner can load
+an old `.env`. Never run destructive database tests against real user data.
+GitHub tests and secret scanning remain available. Automatic hosted outcome
+uploads are disabled; the source repository is not a deployment.
 
 ## License
 

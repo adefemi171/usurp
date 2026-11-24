@@ -1,15 +1,13 @@
 name: Attest Usurp CI outcome
-on:
-  workflow_run:
-    workflows: [Verify Usurp]
-    types: [completed]
-    branches: [main]
+# Archived configuration: hosted uploads retired. No automatic event triggers.
+# Kept for audit history; run verification locally with Connect instead.
+on: workflow_dispatch
 permissions:
   contents: read
 jobs:
   attest:
     # Trust only the upstream run for a push in this repository, never fork PR code.
-    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

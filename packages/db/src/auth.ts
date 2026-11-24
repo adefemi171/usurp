@@ -210,6 +210,12 @@ export async function signInWithOAuth(db: Db, profile: OAuthProfile): Promise<Si
       .limit(1);
 
     if (existing) {
+      // Offline identities have no mutable upstream profile. Do not issue an
+      // empty UPDATE: Drizzle rejects it, breaking every login after the first.
+      if (!profile.displayName && !profile.avatarUrl && !profile.email) {
+        const [user] = await tx.select().from(users).where(eq(users.id, existing.userId));
+        return { user: user!, created: false };
+      }
       // Refresh the mutable profile bits; never touch the handle, which the
       // user may have deliberately changed.
       const [user] = await tx

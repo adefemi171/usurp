@@ -13,7 +13,7 @@ type Preferences = { server: string; agents: string[]; bridge: boolean; all: boo
 type Pending = { code: string; token: string; publicKey: string; expiresAt: string; server: string };
 export type SyncResult = { ok: boolean; uploaded: boolean; warnings: number; batches?: number };
 export class Controller {
-  prefs: Preferences = { server: "https://usurp.onrender.com", agents: [], bridge: false, all: false, consent: false, paused: true, imported: false };
+  prefs: Preferences = { server: "http://localhost:3000", agents: [], bridge: false, all: false, consent: false, paused: true, imported: false };
   pending?: Pending;
   busy = false;
   status = "Connect an account. Nothing is being collected or uploaded.";
@@ -40,7 +40,11 @@ export class Controller {
     } catch { /* unreadable preferences never enable collection */ }
     try { const p = JSON.parse((await loadKey(this.account)).privateKeyPem); this.pending = { ...p, server: serverOrigin(p.server) }; } catch { /* no pending approval */ }
     const c = await loadConfig();
-    if (c.deviceId) { this.prefs.server = serverOrigin(c.apiUrl); await this.clearPending(); this.status = this.prefs.paused ? "Connected. Sync is paused." : "Connected. Automatic sync is enabled."; }
+    if (c.deviceId) {
+      try { this.prefs.server = serverOrigin(c.apiUrl); }
+      catch { this.prefs.paused = true; this.prefs.consent = false; this.status = "Hosted syncing is retired. Disconnect the old device, then pair with your local dashboard."; await this.persist(); return; }
+      await this.clearPending(); this.status = this.prefs.paused ? "Connected. Sync is paused." : "Connected. Automatic sync is enabled.";
+    }
     else if (this.pending) { this.prefs.server = this.pending.server; this.status = "Waiting for browser approval. No data is syncing yet."; }
   }
   async persist() {
@@ -60,6 +64,7 @@ export class Controller {
         url: `${this.pending.server}/connect/approve?code=${encodeURIComponent(this.pending.code)}` } : null };
   }
   private async api(body: unknown, origin = this.prefs.server) {
+    serverOrigin(origin);
     const r = await fetch(`${origin}/v1/pairings`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), redirect: "error", signal: AbortSignal.timeout(30_000) });
     if (!r.ok) throw new Error(r.status === 429 ? "Too many pairing attempts. Wait a minute and try again." : "The website could not complete pairing. Check the address and connection.");
     return r.json();
@@ -178,6 +183,7 @@ export class Controller {
     this.busy = true; this.status = "Reading selected sources and uploading…"; this.warning = "";
     const all = this.prefs.all && !this.prefs.imported;
     try {
+      serverOrigin((await loadConfig()).apiUrl);
       const result = await this.execute({ agents: [...this.prefs.agents], bridge: this.prefs.bridge, all });
       this.prefs.lastAttempt = new Date().toISOString();
       if (!result.ok) throw new Error();

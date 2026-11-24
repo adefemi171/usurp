@@ -52,7 +52,12 @@ interface ErrorBody {
 }
 
 export class ApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(private readonly baseUrl: string) {
+    const url = new URL(baseUrl);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || !["http:", "https:"].includes(url.protocol)
+      || url.username || url.password || url.search || url.hash || url.pathname !== "/")
+      throw new Error("Usurp is local-only. Re-enroll against http://localhost:3000; remote uploads are disabled.");
+  }
 
   private url(path: string): string {
     return `${this.baseUrl.replace(/\/+$/, "")}${path}`;
@@ -127,6 +132,7 @@ export class ApiClient {
   async health(): Promise<boolean> {
     try {
       const response = await fetch(this.url("/api/health"), {
+        redirect: "error",
         signal: AbortSignal.timeout(5_000),
       });
       return response.ok;

@@ -27,20 +27,20 @@ describe("offline outcome lifecycle", () => {
     expect(JSON.stringify(records)).not.toContain("private label"); expect(JSON.stringify(records)).not.toContain("process.exit");
     expect(fetch).not.toHaveBeenCalled();
     await expect(outcomeCommand(["attest", "--mission", id, "--", process.execPath, "-e", "process.exit(0)"], directory)).rejects.toThrow("limit");
-    await expect(syncOutcomes(directory, "https://usurp.example")).rejects.toThrow("offline");
+    await expect(syncOutcomes(directory, "http://localhost:3000")).rejects.toThrow("offline");
     expect(await readOutcomes(directory)).toEqual(records);
     const request = vi.fn(async (_url, init) => Response.json({ accepted: JSON.parse(init.body).outcome.id }));
-    expect(await syncOutcomes(directory, "https://usurp.example", request as typeof fetch)).toBe(2);
-    expect(await syncOutcomes(directory, "https://usurp.example", request as typeof fetch)).toBe(0);
+    expect(await syncOutcomes(directory, "http://localhost:3000", request as typeof fetch)).toBe(2);
+    expect(await syncOutcomes(directory, "http://localhost:3000", request as typeof fetch)).toBe(0);
     expect(request).toHaveBeenCalledTimes(2);
     expect(await readOutcomes(directory)).toHaveLength(2);
   });
   it("does not acknowledge a rejected response or altered acknowledgement", async () => {
     const id = randomUUID(); await outcomeCommand(["mission-start", "--id", id], directory);
     await outcomeCommand(["attest", "--mission", id, "--", process.execPath, "-e", "process.exit(0)"], directory);
-    await expect(syncOutcomes(directory, "https://usurp.example", async () => Response.json({ accepted: "wrong" }))).rejects.toThrow("acknowledgement");
+    await expect(syncOutcomes(directory, "http://localhost:3000", async () => Response.json({ accepted: "wrong" }))).rejects.toThrow("acknowledgement");
     const request = vi.fn(async (_url, init) => Response.json({ accepted: JSON.parse(init.body).outcome.id }));
-    expect(await syncOutcomes(directory, "https://usurp.example", request as typeof fetch)).toBe(1);
+    expect(await syncOutcomes(directory, "http://localhost:3000", request as typeof fetch)).toBe(1);
     const marker = await readFile(join(directory, "outcome-key.json"), "utf8");
     expect(marker).not.toContain("PRIVATE");
   });

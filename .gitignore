@@ -36,6 +36,8 @@ apps/web/public/downloads/*.sha256
 !/scripts/database-endpoint-probe.test.ts
 !/scripts/init-env.mjs
 !/scripts/init-env.test.ts
+!/scripts/local.mjs
+!/scripts/local-smoke.mjs
 !/scripts/http-smoke.mjs
 !/scripts/compose-smoke.mjs
 
