@@ -3,7 +3,7 @@ export function serverOrigin(value: unknown): string {
   if (typeof value !== "string") throw new Error("Enter your Usurp website address.");
   const url = new URL(value.trim());
   if (url.username || url.password || url.search || url.hash || url.pathname !== "/" ||
-    !(url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("Use an HTTPS website origin (localhost is allowed for testing).");
+    !["http:", "https:"].includes(url.protocol) || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Usurp is local-only. Use a localhost or loopback origin.");
   return url.origin;
 }
 export function sourceSelection(value: unknown): string[] {

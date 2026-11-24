@@ -26,8 +26,8 @@ export async function storeOutcome(directory: string, value: SignedOutcome) {
   try { await link(temporary, join(directory, "outcomes", `${parsed.outcome.id}.json`)); } finally { await unlink(temporary); }
 }
 export async function outcomeSyncPreference(directory: string): Promise<{ enabled: boolean; server: string }> {
-  try { return z.object({ enabled: z.boolean(), server: z.string() }).parse(JSON.parse(await readFile(join(directory, "outcome-sync.json"), "utf8"))); }
-  catch { return { enabled: false, server: "https://usurp.onrender.com" }; }
+  try { const value = z.object({ enabled: z.boolean(), server: z.string() }).parse(JSON.parse(await readFile(join(directory, "outcome-sync.json"), "utf8"))); return { ...value, server: serverOrigin(value.server) }; }
+  catch { return { enabled: false, server: "http://localhost:3000" }; }
 }
 export async function saveOutcomeSyncPreference(directory: string, enabled: boolean, server: string) {
   const value = { enabled, server: serverOrigin(server) };
@@ -85,7 +85,7 @@ export async function outcomeCommand(args: string[], directory: string): Promise
   const flags = separator < 0 ? args : args.slice(0, separator);
   const option = (name: string) => { const i = flags.indexOf(name); return i < 0 ? undefined : flags[i + 1]; };
   const command = args[0];
-  if (command === "attest-sync") { console.log(`Synced ${await syncOutcomes(directory, option("--server") ?? "https://usurp.onrender.com")} outcomes.`); return 0; }
+  if (command === "attest-sync") { console.log(`Synced ${await syncOutcomes(directory, option("--server") ?? "http://localhost:3000")} outcomes.`); return 0; }
   if (command === "attestor-link") {
     const owner = uuid.parse(option("--owner"));
     const keys = await identity(directory);

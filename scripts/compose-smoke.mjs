@@ -10,6 +10,7 @@ const env = {
   POSTGRES_DB: "usurp_ci_smoke",
   POSTGRES_PASSWORD: randomBytes(32).toString("hex"),
   AUTH_SECRET: randomBytes(32).toString("hex"),
+  USURP_LOCAL_PASSWORD: randomBytes(32).toString("hex"),
   POSTGRES_PORT: "55434",
   WEB_PORT: "3001",
   USURP_BASE_URL: "http://localhost:3001",

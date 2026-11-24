@@ -15,20 +15,32 @@ vi.mock("../../packages/cli/src/keystore.js", () => ({
 let root: string, oldDir: string | undefined;
 beforeEach(async () => { oldDir = process.env.USURP_CONFIG_DIR; root = await mkdtemp(join(tmpdir(), "usurp-service-unit-")); keys.clear(); });
 afterEach(() => { if (oldDir === undefined) delete process.env.USURP_CONFIG_DIR; else process.env.USURP_CONFIG_DIR = oldDir; vi.unstubAllGlobals(); });
-const options = { server: "https://usurp.example", agents: ["codex"], bridge: false, all: true, consent: true };
+const options = { server: "http://localhost:3000", agents: ["codex"], bridge: false, all: true, consent: true };
 async function connected(runner = vi.fn(async (_options?: any) => ({ ok: true, uploaded: true, warnings: 0 }))) {
   const c = new Controller(root, runner); await c.init(); await c.action("save", options); await saveConfig({ apiUrl: options.server, seq: 1, deviceId: "dev_TEST", handle: "tester" }); keys.set("dev_TEST", "private"); return { c, runner };
 }
 describe("browser companion consent and recovery", () => {
+  it("pauses existing hosted devices without deleting their identity or sending requests", async () => {
+    const c = new Controller(root); await c.init();
+    await saveConfig({ apiUrl: "https://usurp.onrender.com", deviceId: "dev_OLD", seq: 99 });
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    const restarted = new Controller(root); await restarted.init(); await restarted.tick();
+    expect(restarted.prefs.consent).toBe(false);
+    expect(restarted.prefs.paused).toBe(true);
+    expect((await loadConfig()).deviceId).toBe("dev_OLD");
+    expect(fetcher).not.toHaveBeenCalled();
+    await expect(restarted.action("resume")).rejects.toThrow();
+    await expect(restarted.action("save", { ...options, server: "https://usurp.onrender.com" })).rejects.toThrow("local-only");
+  });
   it("keeps outcome upload consent separate and persists disabling it", async () => {
     const c = new Controller(root); await c.init();
     expect((await outcomeSyncPreference(root)).enabled).toBe(false);
-    await c.action("outcome-sync", { enabled: true, server: "https://proofs.example" });
-    expect(await outcomeSyncPreference(root)).toEqual({ enabled: true, server: "https://proofs.example" });
+    await c.action("outcome-sync", { enabled: true, server: "http://localhost:3001" });
+    expect(await outcomeSyncPreference(root)).toEqual({ enabled: true, server: "http://localhost:3001" });
     expect(c.prefs.consent).toBe(false);
-    await c.action("outcome-sync", { enabled: false, server: "https://proofs.example" });
+    await c.action("outcome-sync", { enabled: false, server: "http://localhost:3001" });
     expect((await new Controller(root).state()).outcomeSync.enabled).toBe(false);
-    await expect(c.action("outcome-sync", { enabled: "true", server: "https://proofs.example" })).rejects.toThrow("Invalid");
+    await expect(c.action("outcome-sync", { enabled: "true", server: "http://localhost:3001" })).rejects.toThrow("Invalid");
   });
   it("never collects before consent", async () => { const runner = vi.fn(); const c = new Controller(root, runner); await c.init(); await c.tick(); await c.runSync(); expect(runner).not.toHaveBeenCalled(); expect((await c.state()).paused).toBe(true); });
   it("requires sources and boolean consent", async () => { const c = new Controller(root); await c.init(); await expect(c.action("save", {...options, agents:[]})).rejects.toThrow("source"); await expect(c.action("save", {...options, consent:"yes"})).rejects.toThrow("Invalid"); });
@@ -39,7 +51,7 @@ describe("browser companion consent and recovery", () => {
   it("retries failure without marking the archive complete", async () => { const runner=vi.fn().mockResolvedValueOnce({ok:false,uploaded:false,warnings:0}).mockResolvedValue({ok:true,uploaded:true,warnings:0}); const {c}=await connected(runner); await c.runSync(); expect(c.prefs.imported).toBe(false); expect(c.prefs.lastUpload).toBeUndefined(); expect(c.nextSync).toBeGreaterThan(Date.now()+110000); c.nextSync=0; await c.tick(); await vi.waitFor(()=>expect(c.busy).toBe(false)); expect(c.prefs.lastUpload).toBeTruthy(); expect(c.failures).toBe(0); });
   it("blocks overlapping sync and prevents changing sources during upload", async () => { let finish!: (v:any)=>void; const runner=vi.fn(()=>new Promise<any>(r=>{finish=r;})); const {c}=await connected(runner); const pending=c.runSync(); await c.runSync(); await expect(c.action("save",options)).rejects.toThrow("current sync"); await c.action("pause"); finish({ok:true,uploaded:true,warnings:0}); await pending; expect(runner).toHaveBeenCalledTimes(1); expect(c.prefs.paused).toBe(true); });
   it("source changes reset the lookback and archive cursor", async () => { const {c}=await connected(); await c.runSync(); await saveConfig({...await loadConfig(),lastSyncAt:new Date().toISOString()}); await c.action("save",{...options,agents:["cursor"]}); expect(c.prefs.imported).toBe(false); expect((await loadConfig()).lastSyncAt).toBeUndefined(); });
-  it("does not silently switch an enrolled deployment", async () => { const {c}=await connected(); await expect(c.action("save",{...options,server:"https://evil.example"})).rejects.toThrow("Disconnect"); });
+  it("does not silently switch an enrolled deployment", async () => { const {c}=await connected(); await expect(c.action("save",{...options,server:"http://localhost:3002"})).rejects.toThrow("Disconnect"); });
   it("disconnect removes its key, not other device keys", async () => { const {c}=await connected(); keys.set("another-device","untouched"); await c.action("disconnect"); expect(keys.has("dev_TEST")).toBe(false); expect(keys.get("another-device")).toBe("untouched"); expect((await loadConfig()).deviceId).toBeUndefined(); expect(c.prefs.consent).toBe(false); });
   it("malformed preferences fail closed", async () => { await writeFile(join(root,"preferences.json"),JSON.stringify({...options,paused:"false"})); const c=new Controller(root); await c.init(); expect(c.prefs.consent).toBe(false); });
   it("pairs via browser approval, stores secrets in keyring, and never auto-consents", async () => {
@@ -48,5 +60,5 @@ describe("browser companion consent and recovery", () => {
     const restarted=new Controller(root);await restarted.init();await restarted.tick();expect((await loadConfig()).deviceId).toBe("dev_PAIRED");expect(restarted.prefs.consent).toBe(false);expect(keys.has("dev_PAIRED")).toBe(true);expect(JSON.stringify(await readFile(join(root,"device/config.json"),"utf8"))).not.toContain("PRIVATE KEY");
   });
   it("expires pending approval without enrolling", async () => { const c=new Controller(root);await c.init();c.pending={code:"ABCD-1234-5678",token:"A".repeat(43),publicKey:"test",expiresAt:new Date(0).toISOString(),server:options.server};await c.tick();expect(c.pending).toBeUndefined();expect((await loadConfig()).deviceId).toBeUndefined(); });
-  it("validates server origins and source choices",()=>{ expect(serverOrigin("https://usurp.example/")).toBe("https://usurp.example");for(const v of ["http://remote.example","https://user:pass@site.example","https://site.example/path","https://site.example#token"])expect(()=>serverOrigin(v)).toThrow();expect(()=>sourceSelection(["codex","codex"])).toThrow();expect(()=>sourceSelection(["unknown"])).toThrow(); });
+  it("validates server origins and source choices",()=>{ expect(serverOrigin("http://localhost:3000/")).toBe("http://localhost:3000");for(const v of ["http://remote.example","https://user:pass@site.example","https://site.example/path","https://site.example#token"])expect(()=>serverOrigin(v)).toThrow();expect(()=>sourceSelection(["codex","codex"])).toThrow();expect(()=>sourceSelection(["unknown"])).toThrow(); });
 });

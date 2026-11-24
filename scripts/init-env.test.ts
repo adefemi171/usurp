@@ -12,6 +12,7 @@ describe('new-install secret setup', () => {
       const text = readFileSync(join(dir,'.env'),'utf8');
       const password = /^POSTGRES_PASSWORD=(.+)$/m.exec(text)![1];
       expect(password).toMatch(/^[a-f0-9]{64}$/);
+      expect(/^USURP_LOCAL_PASSWORD=(.+)$/m.exec(text)![1]).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(new URL(/^DATABASE_URL=(.+)$/m.exec(text)![1]).password).toBe(password);
       expect(statSync(join(dir,'.env')).mode & 0o777).toBe(0o600);
       expect(() => initializeEnv(dir)).toThrow();

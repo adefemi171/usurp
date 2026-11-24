@@ -22,7 +22,7 @@ if (!["dev", "start", "build"].includes(script)) {
   process.exit(2);
 }
 
-const child = spawn("npm", ["-w", "@usurp/web", "run", script], {
+const child = spawn("npm", ["-w", "@usurp/web", "run", script, ...(script === "build" ? [] : ["--", "--hostname", "127.0.0.1"])], {
   stdio: "inherit",
   // No shell: nothing here is user input, and a shell would only add a layer
   // that swallows signals.

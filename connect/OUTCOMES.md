@@ -1,5 +1,11 @@
 # Offline verification and the outcome arena
 
+**Local-only update (2026-11-24):** Hosted syncing is retired. Use
+`http://localhost:3000`; only loopback destinations are accepted. GitHub automatic
+outcome uploads are disabled. The CI setup below is historical design context,
+not an active hosted workflow. Local test verification and experiments remain
+available offline. Arenas now contain only this installation's data.
+
 Connect can create missions, execute checks, sign their result, and compare experiments without an account or internet. Installation must already be available. Tests that download dependencies still require their own network access; Usurp does not make them offline. GitHub PR state inherently requires contacting GitHub.
 
 ## Local workflow

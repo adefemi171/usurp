@@ -1,5 +1,10 @@
 # Usurp Connect
 
+Usurp is now local-only. First run `npm run local:up` from the repository.
+Connect sends summaries only to a loopback dashboard; remote server addresses
+are rejected. Existing hosted pairings pause until you disconnect and pair
+locally. Stop and upgrade old installed collectors for this restriction to apply.
+
 A local background service with browser controls. Node.js **22.13 or newer** is
 required; no repository, Docker, Electron, or native app installer is required.
 macOS/Windows use the OS keychain; Linux needs an unlocked Secret Service keyring.
@@ -13,7 +18,7 @@ failure handling have automated tests; a real logout/login cycle is not yet test
 Install the package from your trusted Usurp deployment's `/connect` page:
 
 ```sh
-curl --fail --location --retry 3 --output "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz" https://usurp.onrender.com/downloads/usurp-connect-0.1.0.tgz
+curl --fail --location --retry 3 --output "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz" http://localhost:3000/downloads/usurp-connect-0.1.0.tgz
 npm install --global "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz"
 usurp-connect
 ```
@@ -21,7 +26,7 @@ usurp-connect
 For a user-local install without administrator access:
 
 ```sh
-curl --fail --location --retry 3 --output "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz" https://usurp.onrender.com/downloads/usurp-connect-0.1.0.tgz
+curl --fail --location --retry 3 --output "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz" http://localhost:3000/downloads/usurp-connect-0.1.0.tgz
 npm install --prefix "$HOME/.local/share/usurp-connect" "${TMPDIR:-/tmp}/usurp-connect-0.1.0.tgz"
 "$HOME/.local/share/usurp-connect/node_modules/.bin/usurp-connect"
 ```
@@ -46,7 +51,7 @@ before switching to a separately enrolled device to avoid duplicated history.
 `usurp-connect status` reports server/device, last check, and last confirmed upload.
 `usurp-connect stop` stops this process; login startup, if enabled, is unchanged.
 `usurp-connect serve` runs in the foreground. `start --no-open` runs headlessly.
-`--server https://your-usurp.example` selects a deployment; connected devices
+`--server http://localhost:3000` selects a local dashboard; connected devices
 must disconnect first before switching. `--port 43128` selects a different
 loopback port if 43127 is occupied. `--data-dir PATH` isolates service state.
 
@@ -62,9 +67,9 @@ is confirmed. A no-data check is not labeled as an upload. Revoked devices canno
 upload; disconnect and pair again if appropriate. Pause prevents future uploads
 but does not cancel an upload already in flight. Stopping the process cancels it;
 retry is deduplicated. No always-on availability is promised while the computer
-is asleep, offline, logged out, or the free hosted website is waking up.
+is asleep, logged out, or the local dashboard is stopped. Internet is not required.
 
-Only usage aggregates leave the machine, never prompts, code, file paths, project
+Only usage aggregates go to the local dashboard, never prompts, code, file paths, project
 names, or session titles. AgentsView is optional at `http://127.0.0.1:8080`.
 Its all-time daily summaries are separate from native hourly counters; enabling
 it imports all available AgentsView agents, even if a native reader is unchecked.

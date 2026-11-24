@@ -7,6 +7,7 @@ import { EmailForm } from "./email-form";
 import { currentUser } from "../../lib/session";
 import { redirect } from "next/navigation";
 import { safeReturnTo } from "../../lib/return-to";
+import { localAuthEnabled } from "../../lib/local-auth";
 
 const LABELS: Record<string, string> = {
   github: "Sign in with GitHub",
@@ -15,6 +16,7 @@ const LABELS: Record<string, string> = {
 
 /** Messages for the `error` codes the callback redirects back with. */
 const ERRORS: Record<string, string> = {
+  local_password: "Incorrect local password. Use USURP_LOCAL_PASSWORD from your private .env.local file.",
   cancelled: "Sign-in was cancelled.",
   provider_error: "The provider reported an error. Try again.",
   missing_code: "The provider did not return an authorization code.",
@@ -40,6 +42,7 @@ export default async function SignInPage({
   const returnTo =
     typeof params.return_to === "string" ? params.return_to : undefined;
   const providers: string[] = availableProviders();
+  const local = localAuthEnabled();
 
   const query = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "";
 
@@ -77,7 +80,8 @@ export default async function SignInPage({
 
         <section className="signin-card" aria-label="Sign in options">
           <h2>Welcome to Usurp</h2>
-          <p>Sign in or create your account to get started.</p>
+          <p>{local ? "Private dashboard on this computer. No internet or online account is needed." : "Sign in or create your account to get started."}</p>
+          {local && <form className="form" action="/auth/local" method="POST"><label className="field">Local password<input className="input" type="password" name="password" required maxLength={256} autoComplete="current-password" /></label><button className="button" type="submit">Open local dashboard</button><p className="field-hint">Use USURP_LOCAL_PASSWORD from your private .env.local file. Do not share this password.</p></form>}
           <div className="stack">
             {providers.map((id) => (
               <a
@@ -103,7 +107,7 @@ export default async function SignInPage({
               </a>
             ))}
           </div>
-          {providers.length === 0 && (
+          {!local && providers.length === 0 && (
             <p className="field-hint">
               GitHub sign-in is not configured on this deployment.
             </p>
@@ -112,7 +116,7 @@ export default async function SignInPage({
             Signing in never joins a public board automatically. You decide what
             to share in Settings.
           </p>
-          {emailAuthEnabled() ? (
+          {!local && (emailAuthEnabled() ? (
             <div className="auth-options">
               <p>Or use your email address</p>
               <EmailForm returnTo={returnTo} />
@@ -122,11 +126,11 @@ export default async function SignInPage({
               Email sign-in will be available once this deployment’s email
               sender is configured.
             </p>
-          )}
-          <p className="field-hint">
+          ))}
+          {!local && <p className="field-hint">
             Already use GitHub? Continue with GitHub, then link your email in
             Settings to keep one account.
-          </p>
+          </p>}
         </section>
 
         {devAuthEnabled() && (

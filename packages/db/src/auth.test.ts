@@ -134,6 +134,13 @@ describe.skipIf(!hasDb)("auth (database)", () => {
   }
 
   describe("signInWithOAuth", () => {
+    it("signs a local owner in repeatedly without upstream profile fields", async () => {
+      const p = { provider: "local", providerUid: `owner_${crypto.randomUUID()}`, username: "local_test_owner" };
+      const first = await signInWithOAuth(db, p); created.push(first.user.id);
+      const second = await signInWithOAuth(db, p);
+      expect(second.created).toBe(false);
+      expect(second.user.id).toBe(first.user.id);
+    });
     it("creates an account on first sight and derives a handle", async () => {
       const { user, created: isNew } = await newUser({ username: "octocat" });
       expect(isNew).toBe(true);

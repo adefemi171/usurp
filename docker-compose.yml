@@ -1,4 +1,4 @@
-# Usurp — self-hosted application stack.
+# Usurp — local-only application stack. Do not publish through a tunnel/proxy.
 #
 #   docker compose up -d          # postgres, migrations, then the board on :3000
 #   docker compose run --rm enroll --handle kenn
@@ -80,6 +80,9 @@ services:
       DATABASE_CA_CERT: ${DATABASE_CA_CERT:-}
       NODE_ENV: production
       PORT: "3000"
+      USURP_LOCAL_ONLY: "1"
+      USURP_LOCAL_PASSWORD: ${USURP_LOCAL_PASSWORD:?Generate a local password in .env}
+      USURP_LOCAL_OWNER_ID: ${USURP_LOCAL_OWNER_ID:-}
       # OAuth configuration must be explicitly forwarded: Compose reads .env
       # for interpolation, but does not otherwise inject it into containers.
       USURP_BASE_URL: ${USURP_BASE_URL:-http://localhost:3000}
@@ -91,7 +94,7 @@ services:
       USURP_AGENTS_VIEW_URL: ${USURP_AGENTS_VIEW_URL:-}
       USURP_AGENTS_VIEW_DEVICE_ID: ${USURP_AGENTS_VIEW_DEVICE_ID:-}
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,6 +126,7 @@ services:
       DATABASE_CA_CERT: ${DATABASE_CA_CERT:-}
       NODE_ENV: production
       USURP_BASE_URL: ${USURP_BASE_URL:-http://localhost:3000}
+      USURP_LOCAL_ONLY: "1"
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-}
     depends_on:

@@ -13,6 +13,11 @@
     "apps/*"
   ],
   "scripts": {
+    "local:setup": "node scripts/local.mjs setup",
+    "local:up": "node scripts/local.mjs up",
+    "local:start": "node scripts/local.mjs start",
+    "local:stop": "node scripts/local.mjs stop",
+    "local:status": "node scripts/local.mjs status",
     "build": "tsc -b",
     "build:web": "npm run build && npm run build:connect && npm -w @usurp/web run build",
     "build:connect": "node connect/build.mjs",
